@@ -42,6 +42,9 @@ export function FocusChart({
           onTouchMove={pick}
           onClick={pick}
         >
+          {/* Tick size in rem, not px: SVG text ignores the cascade, so this
+              keeps the axis on the same text-xs step as the day detail below
+              and lets it track the root font-size. */}
           <XAxis
             dataKey="dayKey"
             tickFormatter={faDateShort}
@@ -49,7 +52,7 @@ export function FocusChart({
             axisLine={false}
             tickMargin={8}
             minTickGap={32}
-            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: "0.75rem", fill: "var(--color-muted-foreground)" }}
           />
           <YAxis hide domain={[0, "auto"]} />
           {selected && (

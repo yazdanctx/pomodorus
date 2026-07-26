@@ -164,19 +164,20 @@ export function CategoryPicker({
                             {copy.categories.privateBadge}
                           </span>
                         )}
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           aria-label={t(copy.categories.editAria, {
                             name: category.name,
                           })}
-                          className="rounded-none p-1 text-muted-foreground hover:text-foreground"
+                          className="text-muted-foreground hover:text-foreground"
                           onClick={(e) => {
                             e.stopPropagation();
                             setView({ name: "edit", category });
                           }}
                         >
-                          <Pencil className="size-3.5" />
-                        </button>
+                          <Pencil />
+                        </Button>
                       </CommandItem>
                     ))}
                   </CommandGroup>

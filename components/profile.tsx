@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { FocusChart } from "@/components/focus-chart";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { copy, t } from "@/lib/copy";
 import { faDate, faDigits, faDuration } from "@/lib/format";
@@ -78,7 +79,7 @@ export function Profile({ username }: { username: string }) {
           <Skeleton className="h-7 w-36" />
           <div className="mt-8 flex items-center justify-between gap-3">
             <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-7 w-40" />
           </div>
           <ChartAreaSkeleton />
         </div>
@@ -99,19 +100,16 @@ export function Profile({ username }: { username: string }) {
             </h2>
             <div className="flex" role="group">
               {RANGES.map((r) => (
-                <button
+                <Button
                   key={r}
-                  type="button"
+                  size="xs"
+                  variant={range === r ? "secondary" : "ghost"}
                   aria-pressed={range === r}
                   onClick={() => setRange(r)}
-                  className={`px-2.5 py-1 text-xs transition-colors ${
-                    range === r
-                      ? "bg-secondary text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  className={range === r ? "" : "text-muted-foreground"}
                 >
                   {t(copy.profile.rangeDays, { n: faDigits(r) })}
-                </button>
+                </Button>
               ))}
             </div>
           </div>

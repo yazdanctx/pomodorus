@@ -93,5 +93,8 @@
   }
   html {
     @apply font-sans;
+    /* Global scale-up: everything rem-based (type, spacing, controls)
+       grows together — 16px base was too small for Persian text. */
+    font-size: 112.5%;
   }
 }

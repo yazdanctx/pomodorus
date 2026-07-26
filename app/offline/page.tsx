@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { cn } from "@/lib/utils";
 import { copy } from "@/lib/copy";
 
 // The service worker's navigation fallback: shown when an uncached page
@@ -10,10 +12,9 @@ export default function OfflinePage() {
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
       <h1 className="text-2xl font-black tracking-tight">{copy.offline.pageTitle}</h1>
       <p className="text-sm leading-7 text-muted-foreground">{copy.offline.pageBody}</p>
-      <Link
-        href="/app"
-        className="mt-2 inline-flex h-10 items-center justify-center bg-primary px-6 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-      >
+      {/* buttonVariants rather than <Button asChild>: keeps the CTA on the
+          shared button scale while the page stays a server component. */}
+      <Link href="/app" className={cn(buttonVariants({ size: "lg" }), "mt-2")}>
         {copy.offline.pageCta}
       </Link>
     </main>
