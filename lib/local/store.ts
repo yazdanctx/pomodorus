@@ -127,13 +127,32 @@ export function skipBreak() {
   dispatch({ type: "skipBreak" });
 }
 
-/** The new category's clientId, or null when the name was rejected. */
-export function createCategory(name: string, isPublic: boolean): string | null {
-  return dispatch({ type: "createCategory", name, isPublic }).created ?? null;
+/**
+ * The refusal a name can meet — too long, already busy, or on the wordlist —
+ * carrying the sentence to put in front of the user. The picker is the one
+ * place a rejection is worth showing: a name is typed, so it can be wrong.
+ */
+export type Refused = { rejected: string };
+
+/** The new category's clientId, or why it was refused. */
+export function createCategory(
+  name: string,
+  isPublic: boolean,
+): { clientId: string } | Refused {
+  const { created, rejected } = dispatch({ type: "createCategory", name, isPublic });
+  // `apply` always names its reason when it declines to create; the empty
+  // fallback only exists so the type does not lie, and shows nothing.
+  return created !== undefined ? { clientId: created } : { rejected: rejected ?? "" };
 }
 
-export function updateCategory(clientId: string, name: string, isPublic: boolean) {
-  dispatch({ type: "updateCategory", clientId, name, isPublic });
+/** Null when the edit went through. */
+export function updateCategory(
+  clientId: string,
+  name: string,
+  isPublic: boolean,
+): Refused | null {
+  const { rejected } = dispatch({ type: "updateCategory", clientId, name, isPublic });
+  return rejected === undefined ? null : { rejected };
 }
 
 export function deleteCategory(clientId: string) {

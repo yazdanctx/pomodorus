@@ -5,6 +5,7 @@ import {
   accept,
   advertisement,
   isLive,
+  isShowable,
   visibleLabel,
   type Presence,
 } from "../lib/presence";
@@ -101,9 +102,27 @@ test("a start time beyond clock skew is rejected", () => {
   assert.equal(accept(row({ startedAt: Number.NaN }), NOW), null);
 });
 
+test("a profane label is not stored at all", () => {
+  assert.equal(accept(row({ label: "سکس" }), NOW), null);
+  assert.equal(accept(row({ label: "یه کم کیر" }), NOW), null);
+  // Read before the 40-character cap, so a long label cannot smuggle a word
+  // past by putting it where the trim would have cut it off anyway.
+  assert.equal(accept(row({ label: `${"ا".repeat(45)} سکس` }), NOW), null);
+  assert.notEqual(accept(row({ label: "درس خوندن" }), NOW), null);
+});
+
 test("a viewer sees a work label and never a break's", () => {
   assert.equal(visibleLabel(row({ kind: "work", label: "کد نویسی" })), "کد نویسی");
   assert.equal(visibleLabel(row({ kind: "work", label: null })), null);
   assert.equal(visibleLabel(row({ kind: "shortBreak", label: "کد نویسی" })), null);
   assert.equal(visibleLabel(row({ kind: "longBreak", label: "کد نویسی" })), null);
+});
+
+test("the feed drops an item profane on either half of its line", () => {
+  assert.equal(isShowable(row(), "sara_71"), true);
+  // A label that predates the wordlist, or a username that can never be edited.
+  assert.equal(isShowable(row({ label: "سکس" }), "sara_71"), false);
+  assert.equal(isShowable(row(), "koskesh"), false);
+  // A break carries no label, so only the username can take it out.
+  assert.equal(isShowable(row({ kind: "shortBreak", label: "سکس" }), "sara_71"), true);
 });

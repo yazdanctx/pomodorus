@@ -16,6 +16,7 @@ import {
   SHORT_BREAK_MS,
   type LocalState,
 } from "../lib/local/types";
+import { copy } from "../lib/copy";
 
 const T0 = 1_000_000_000_000;
 
@@ -290,6 +291,33 @@ test("a blank or overlong name is refused", () => {
     }).created,
     undefined,
   );
+});
+
+test("a profane name is refused, on the way in and on a rename", () => {
+  const created = at(T0, EMPTY_STATE, {
+    type: "createCategory",
+    name: "سکس",
+    isPublic: true,
+  });
+  assert.equal(created.created, undefined);
+  assert.equal(created.rejected, copy.errors.categoryNameProfane);
+  assert.deepEqual(created.state.pendingCategoryOps, []);
+
+  // A clean category cannot be renamed into one either — which is the point of
+  // checking here rather than only at creation.
+  const state = at(T0, EMPTY_STATE, {
+    type: "createCategory",
+    name: "درس خوندن",
+    isPublic: true,
+  }).state;
+  const renamed = at(T0 + 1, state, {
+    type: "updateCategory",
+    clientId: "id1",
+    name: "کیری",
+    isPublic: true,
+  });
+  assert.equal(renamed.rejected, copy.errors.categoryNameProfane);
+  assert.equal(renamed.state.pendingCategoryOps[0].name, "درس خوندن");
 });
 
 test("a later edit replaces the queued one rather than stacking", () => {

@@ -1,7 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Check, ChevronsUpDown, Pencil, Plus } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  ChevronsUpDown,
+  Pencil,
+  Plus,
+  TriangleAlert,
+} from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +40,27 @@ type View =
   | { name: "create" }
   | { name: "edit"; category: Category };
 
+/**
+ * Why a name was refused. Same treatment as the login page's failures: the
+ * theme is monochrome, so it separates itself from the grey around it by being
+ * full white, boxed and iconned, and it is announced because it appears after
+ * a press rather than beside the field.
+ */
+function Refusal({ reason }: { reason: string | null }) {
+  return (
+    <div aria-live="polite">
+      {reason && (
+        <Alert className="text-foreground">
+          <TriangleAlert />
+          <AlertDescription className="text-foreground">
+            {reason}
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 export function CategoryPicker({
   selected,
   onSelect,
@@ -46,6 +75,7 @@ export function CategoryPicker({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>({ name: "picker" });
   const [search, setSearch] = useState("");
+  const [refused, setRefused] = useState<string | null>(null);
 
   const selectedCategory =
     categories.find((c) => c.clientId === selected) ?? null;
@@ -66,12 +96,16 @@ export function CategoryPicker({
     setOpen(false);
     setView({ name: "picker" });
     setSearch("");
+    setRefused(null);
   }
 
   function createFromSearch() {
-    const clientId = createCategory(search.trim(), true);
-    if (clientId === null) return;
-    onSelect(clientId);
+    const result = createCategory(search.trim(), true);
+    if ("rejected" in result) {
+      setRefused(result.rejected);
+      return;
+    }
+    onSelect(result.clientId);
     closeAndReset();
   }
 
@@ -128,7 +162,11 @@ export function CategoryPicker({
                     autoFocus
                     placeholder={copy.categories.search}
                     value={search}
-                    onValueChange={setSearch}
+                    onValueChange={(next) => {
+                      setSearch(next);
+                      // The refusal was about the old text.
+                      setRefused(null);
+                    }}
                   />
                 </div>
 
@@ -199,6 +237,7 @@ export function CategoryPicker({
                   </CommandGroup>
                 </CommandList>
               </Command>
+              <Refusal reason={refused} />
             </>
           )}
 
@@ -256,10 +295,15 @@ function CreateView({
 }) {
   const [name, setName] = useState("");
   const [isPublic, setIsPublic] = useState(true);
+  const [refused, setRefused] = useState<string | null>(null);
 
   function handleCreate() {
-    const clientId = createCategory(name, isPublic);
-    if (clientId !== null) onCreated(clientId);
+    const result = createCategory(name, isPublic);
+    if ("rejected" in result) {
+      setRefused(result.rejected);
+      return;
+    }
+    onCreated(result.clientId);
   }
 
   return (
@@ -280,7 +324,10 @@ function CreateView({
           value={name}
           dir="auto"
           maxLength={40}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setRefused(null);
+          }}
           onKeyDown={(e) => e.key === "Enter" && handleCreate()}
         />
         <div className="flex items-center justify-between">
@@ -293,6 +340,7 @@ function CreateView({
             onCheckedChange={setIsPublic}
           />
         </div>
+        <Refusal reason={refused} />
         <div className="flex gap-2">
           <Button size="sm" onClick={handleCreate} disabled={!name.trim()}>
             {copy.categories.add}
@@ -317,6 +365,16 @@ function EditView({
 }) {
   const [name, setName] = useState(category.name);
   const [isPublic, setIsPublic] = useState(category.isPublic);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  function handleSave() {
+    const result = updateCategory(category.clientId, name, isPublic);
+    if (result !== null) {
+      setRefused(result.rejected);
+      return;
+    }
+    onBack();
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -327,7 +385,10 @@ function EditView({
           value={name}
           dir="auto"
           maxLength={40}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setRefused(null);
+          }}
         />
         <div className="flex items-center justify-between">
           <Label
@@ -342,15 +403,9 @@ function EditView({
             onCheckedChange={setIsPublic}
           />
         </div>
+        <Refusal reason={refused} />
         <div className="flex justify-between gap-2">
-          <Button
-            size="sm"
-            disabled={!name.trim()}
-            onClick={() => {
-              updateCategory(category.clientId, name, isPublic);
-              onBack();
-            }}
-          >
+          <Button size="sm" disabled={!name.trim()} onClick={handleSave}>
             {copy.categories.save}
           </Button>
           <Button

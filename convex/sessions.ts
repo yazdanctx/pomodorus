@@ -2,7 +2,7 @@ import { v, ConvexError } from "convex/values";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import copy from "../lib/copy.json";
-import { SWEEP_GRACE_MS, accept, isLive, visibleLabel } from "../lib/presence";
+import { SWEEP_GRACE_MS, accept, isLive, isShowable, visibleLabel } from "../lib/presence";
 import { tehranDayKey } from "./days";
 
 export const WORK_MINUTES = [25, 55] as const;
@@ -77,6 +77,7 @@ export const activeFeed = query({
       if (!isLive(p, now)) continue;
       const user = await ctx.db.get(p.userId);
       if (!user?.username) continue;
+      if (!isShowable(p, user.username)) continue;
       feed.push({
         id: p._id,
         username: user.username,

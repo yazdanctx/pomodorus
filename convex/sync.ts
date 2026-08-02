@@ -3,6 +3,7 @@ import { mutation, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import copy from "../lib/copy.json";
+import { isProfane } from "../lib/profanity";
 import { WORK_MINUTES } from "./sessions";
 
 const MINUTE_MS = 60_000;
@@ -33,9 +34,17 @@ async function findOwnCategory(
   return row && row.userId === userId ? row : null;
 }
 
+/**
+ * The same test the device applies before queueing the op (`lib/local/device`),
+ * repeated because the device is not trusted with it: a category name reaches
+ * the public feed, and the queue is a plain JSON blob in localStorage that
+ * anyone can hand-edit. A refused name is dropped like any other invalid item,
+ * silently — the client that meant it already said no in its own words.
+ */
 function validName(name: string | undefined): string | null {
   const trimmed = name?.trim() ?? "";
-  return trimmed.length >= 1 && trimmed.length <= 40 ? trimmed : null;
+  if (trimmed.length < 1 || trimmed.length > 40) return null;
+  return isProfane(trimmed) ? null : trimmed;
 }
 
 /**

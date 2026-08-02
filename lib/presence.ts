@@ -4,6 +4,7 @@
 // how long the claim stands, and what a viewer may see of it were previously
 // re-decided by the sync engine, the feed query and the feed itself.
 
+import { isProfane } from "./profanity";
 import type { SessionKind } from "./local/types";
 
 const MINUTE_MS = 60_000;
@@ -63,11 +64,16 @@ export function advertisement(
  * it. Rejects nonsense, anything claiming to run longer than a session can, and
  * anything claiming to have started in the future. Normalizing the label here
  * rather than at the call site means a caller cannot forget to.
+ *
+ * A profane label is refused outright rather than blanked: the feed drops the
+ * whole item (`isShowable`), so storing the row would only put the word in the
+ * database for nobody to read.
  */
 export function accept(row: Presence, now: number): Presence | null {
   if (!Number.isFinite(row.startedAt) || !Number.isFinite(row.durationMs)) return null;
   if (row.durationMs <= 0 || row.durationMs > MAX_SESSION_MS) return null;
   if (row.startedAt > now + CLOCK_SKEW_MS) return null;
+  if (isProfane(row.label)) return null;
   return {
     kind: row.kind,
     label: row.label === null ? null : row.label.trim().slice(0, LABEL_MAX) || null,
@@ -79,4 +85,18 @@ export function accept(row: Presence, now: number): Presence | null {
 /** The label a viewer may see: a break shows none, and a private task never had one. */
 export function visibleLabel(row: Presence): string | null {
   return row.kind === "work" ? row.label : null;
+}
+
+/**
+ * May the feed show this row at all? Profanity in either half of the line — the
+ * category name the device advertised or the username it goes out under — takes
+ * the whole item out. Masking the label would leave the item making the same
+ * point under a username, and there is nothing to gain by keeping the row.
+ *
+ * `accept` already turns profane labels away at the door, so in practice this
+ * catches usernames (which presence does not carry, and which are immutable
+ * once chosen) and rows written before the wordlist existed.
+ */
+export function isShowable(row: Presence, username: string): boolean {
+  return !isProfane(username) && !isProfane(visibleLabel(row));
 }

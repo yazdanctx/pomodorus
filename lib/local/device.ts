@@ -7,6 +7,7 @@
 // localStorage, `Date.now` and `crypto.randomUUID`.
 
 import copy from "../copy.json";
+import { isProfane } from "../profanity";
 import {
   type Category,
   type CategoryOp,
@@ -47,9 +48,10 @@ export type Applied = {
 };
 
 /**
- * Run one command. Rejections are returned, not thrown: nothing in the UI has
- * anywhere to show them, and a rejected command must still keep whatever
- * settling the clock made due.
+ * Run one command. Rejections are returned, not thrown: a rejected command must
+ * still keep whatever settling the clock made due, and the caller decides
+ * whether the reason is worth showing — most are unreachable by construction
+ * (the buttons that would cause them are disabled), but a refused name is not.
  */
 export function apply(state: LocalState, command: Command, env: Env): Applied {
   // A session whose end time has passed has already completed, whatever the
@@ -109,6 +111,7 @@ export function apply(state: LocalState, command: Command, env: Env): Applied {
     case "createCategory": {
       const name = validName(command.name);
       if (name === null) return { state: s, rejected: copy.errors.categoryNameLength };
+      if (isProfane(name)) return { state: s, rejected: copy.errors.categoryNameProfane };
       const clientId = env.newId();
       return {
         state: queueOp(s, {
@@ -125,6 +128,7 @@ export function apply(state: LocalState, command: Command, env: Env): Applied {
     case "updateCategory": {
       const name = validName(command.name);
       if (name === null) return { state: s, rejected: copy.errors.categoryNameLength };
+      if (isProfane(name)) return { state: s, rejected: copy.errors.categoryNameProfane };
       if (isRunningOn(s, command.clientId)) {
         return { state: s, rejected: copy.errors.categoryBusy };
       }

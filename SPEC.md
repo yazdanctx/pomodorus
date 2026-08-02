@@ -25,6 +25,7 @@ A very minimal Persian-language pomodoro app with a realtime global activity fee
 ## Auth page
 
 - One route, `/login`, with one form and one button — no sign-in/sign-up toggle, since the server decides which it is. The NavBar is hidden here, so the page carries its own link back to the landing.
+- A profane username cannot be created (see **Profanity**); the server says so in the same alert as any other failure. An account that already has one still signs in.
 - Kept bare: the username field's format hint is the only standing text, and the experimental notice is the only other thing on the page. Neither the immutability of the username nor the fact that an unused one signs you up is spelled out.
 - Submitting shows a spinner and a waiting label, not just a disabled button.
 - Failures render as a bordered, iconned, full-white alert in an `aria-live` region — not as grey text indistinguishable from the field hints.
@@ -52,6 +53,20 @@ See `docs/adr/0001-local-first-timer.md` for why this replaced the original serv
 - Created inline in the start-screen picker; rename, visibility toggle, and delete supported — all fully offline.
 - Cannot delete/edit a category while a session is running on it (checked locally). Deleting keeps past focus time: it tombstones the category, keeping its name, and past sessions keep pointing at it.
 - Sync conflicts resolve last-write-wins: latest timestamped change per category wins, delete beats rename, duplicate names are tolerated.
+- A profane name is refused — on creation and on rename, offline included — and the picker says why. See **Profanity**.
+
+## Profanity
+
+See `docs/adr/0003-profanity-wordlist.md` for the wordlist's provenance and why the check sits where it does.
+
+- Two things a user writes are shown to strangers: a public **category name** and a **username**. Neither may carry profanity, and both are checked against `lib/profanity.json` (Persian, plus a Latin list, since usernames are `[a-z0-9_]` and can only be profane in transliteration).
+- Enforced at creation: a category name is refused by the device's own rules, so it works offline, and on rename as well as creation; a username is refused during signup. `sync.push` repeats the category check server-side, because the pending queue is editable localStorage.
+- Enforced again at the feed, which drops any item whose label or username matches — that is what covers names and accounts created before the wordlist existed.
+- Refusal is never silent: the picker shows the reason in the same white/boxed/iconned alert the login page uses for its failures.
+- Signing in is not blocked. An account minted before the wordlist keeps working; it is simply never shown in the feed. Nothing is filtered on the way out to the person who wrote it — their own device, their own profile, their own history all read normally.
+- Matching folds away spelling (Arabic-keyboard letters, vowel marks, ZWNJ, Persian digits, stretched letters, and words spelled out letter by letter) and covers Persian noun suffixes, but matches whole words rather than substrings. The list is trimmed of everything its public sources carry that is not profanity — animals, ethnicities, drugs, clinical anatomy, ordinary verbs like «کردن». A false positive takes a real person's task name away, so ambiguity resolves in favour of allowing.
+- The list also carries a few names the app's owner keeps out of the feed, under a separate key. They are not profanity; they match identically.
+- `lib/profanity.json` is generated. Rebuild it with `npx tsx scripts/build-profanity.ts`, which is also where words are added or excluded — not in the JSON.
 
 ## Pages & routing
 
@@ -74,6 +89,7 @@ See `docs/adr/0001-local-first-timer.md` for why this replaced the original serv
 - The feed shows **presence**: a best-effort advertisement published when an online client starts a session (or reconnects mid-session), self-expiring at the session's end time. It is advisory, not truth — an offline cancel can leave a stale entry for up to one session length; a session started offline appears late or not at all.
 - Shows users currently **working**: username (linked to their profile) + category name + remaining time. Private category → shown as a private task, name hidden.
 - Shows users currently **on break**: username + break label.
+- Profanity: an item whose category name or username matches the wordlist is dropped whole — not masked. This is the last of four gates; see the **Profanity** section and `docs/adr/0003-profanity-wordlist.md`.
 - Idle users don't appear. The heading always renders and the body holds a row's height, so the section never vanishes: empty shows an "everybody's offline" message, offline shows the offline notice, and a query still in flight shows neither.
 
 ## Offline & PWA

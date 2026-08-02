@@ -5,6 +5,7 @@ import { Scrypt } from "lucia";
 import type { GenericDatabaseWriter } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import copy from "../lib/copy.json";
+import { isProfane } from "../lib/profanity";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
@@ -86,6 +87,15 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       const username = user?.username;
       if (!username || !USERNAME_RE.test(username)) {
         throw new ConvexError(copy.errors.usernameInvalid);
+      }
+      // A username is immutable and public — it heads every feed item and its
+      // own profile URL — so a profane one is refused before it can be minted.
+      // Checked here rather than in `authorize` on purpose: this callback runs
+      // only on signup, so an account that already carries such a name can
+      // still sign in (the feed hides it) instead of being locked out by a
+      // wordlist that did not exist when it was created.
+      if (isProfane(username)) {
+        throw new ConvexError(copy.errors.usernameProfane);
       }
       const clash = await db
         .query("users")
