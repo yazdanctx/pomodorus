@@ -150,9 +150,12 @@ export function Profile({
         {isOwner && <SignOutButton />}
       </div>
 
+      {/* Every state below opens on one `mt-8`. The gap used to be that plus a
+          page-top padding of its own — two spacings for one edge, from back
+          when nothing sat above them. */}
       {view.state === "loading" ? (
-        <div className="pt-10">
-          <div className="mt-8 flex items-center justify-between gap-3">
+        <div className="mt-8">
+          <div className="flex items-center justify-between gap-3">
             <Skeleton className="h-4 w-28" />
             <Skeleton className="h-7 w-40" />
           </div>
@@ -163,8 +166,8 @@ export function Profile({
           {copy.profile.notFound}
         </p>
       ) : (
-        <div className="pt-10">
-          <div className="mt-8 flex items-center justify-between gap-3">
+        <div className="mt-8">
+          <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-muted-foreground">
               {copy.profile.focusPerDay}
             </h2>
