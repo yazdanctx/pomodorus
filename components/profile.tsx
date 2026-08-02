@@ -98,23 +98,21 @@ function SignOutButton() {
   const router = useRouter();
 
   return (
-    <div className="mt-16 flex justify-center pb-4">
-      <Button
-        size="sm"
-        variant="outline"
-        className="text-muted-foreground"
-        onClick={async () => {
-          // A failed sign-out still means leaving: the session it could not
-          // clear is the server's problem, not something to strand the
-          // visitor on their own profile over.
-          await signOut().catch(() => {});
-          router.push("/");
-        }}
-      >
-        <LogOut />
-        {copy.header.signOut}
-      </Button>
-    </div>
+    <Button
+      size="sm"
+      variant="outline"
+      className="text-muted-foreground"
+      onClick={async () => {
+        // A failed sign-out still means leaving: the session it could not
+        // clear is the server's problem, not something to strand the
+        // visitor on their own profile over.
+        await signOut().catch(() => {});
+        router.push("/");
+      }}
+    >
+      <LogOut />
+      {copy.header.signOut}
+    </Button>
   );
 }
 
@@ -143,9 +141,17 @@ export function Profile({
 
   return (
     <main className="flex flex-1 flex-col p-6">
+      {/* The page's one heading, and the one control that isn't about the
+          chart, at opposite ends of a single row. Held at the button's own
+          height in every state — including the states with no button — so
+          the row does not grow under the page when auth resolves. */}
+      <div className="flex h-8 items-center justify-between gap-3">
+        <h1 className="text-base font-medium">{copy.profile.title}</h1>
+        {isOwner && <SignOutButton />}
+      </div>
+
       {view.state === "loading" ? (
         <div className="pt-10">
-          <Skeleton className="h-7 w-36" />
           <div className="mt-8 flex items-center justify-between gap-3">
             <Skeleton className="h-4 w-28" />
             <Skeleton className="h-7 w-40" />
@@ -219,8 +225,6 @@ export function Profile({
           )}
         </div>
       )}
-
-      {isOwner && <SignOutButton />}
     </main>
   );
 }

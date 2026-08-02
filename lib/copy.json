@@ -72,6 +72,7 @@
     "delete": "پاکش کن"
   },
   "profile": {
+    "title": "پروفایل",
     "notFound": "همچین کسی نداریم 🤷",
     "emptyTitle": "اینجا فعلا خالیه",
     "focusPerDay": "تایم تمرکز روزانه",
