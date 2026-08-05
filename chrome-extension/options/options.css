@@ -1,0 +1,57 @@
+body {
+  width: auto;
+  padding: 20px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.row:last-of-type {
+  border-bottom: none;
+}
+
+.row-label {
+  font-size: 13px;
+}
+
+.row-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row-stepper button {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  cursor: pointer;
+}
+.row-stepper button:hover {
+  border-color: var(--fg);
+}
+
+.row-value {
+  min-width: 64px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.saved {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+  min-height: 16px;
+}

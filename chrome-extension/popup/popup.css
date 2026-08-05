@@ -1,0 +1,288 @@
+@font-face {
+  font-family: "Peyda";
+  src: url("../fonts/PeydaFaNumWeb-Regular.woff2") format("woff2");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("../fonts/PeydaFaNumWeb-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("../fonts/PeydaFaNumWeb-Bold.woff2") format("woff2");
+  font-weight: 700;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("../fonts/PeydaFaNumWeb-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #000000;
+  --fg: #ffffff;
+  --muted: #8a8a8a;
+  --ring: #f43f5e; /* rose-500 — the one hue the app allows, for a live ring */
+  --border: #2a2a2a;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Peyda", system-ui, sans-serif;
+}
+
+body {
+  width: 340px;
+}
+
+button {
+  font-family: inherit;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-size: 15px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.icon-btn:hover {
+  border-color: var(--fg);
+}
+
+.screen {
+  flex: 1;
+  padding: 20px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- start screen ---- */
+
+.cycle-row {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 4px 0 8px;
+}
+
+.stepper button {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 18px;
+  cursor: pointer;
+}
+.stepper button:disabled {
+  color: var(--border);
+  border-color: var(--border);
+  cursor: default;
+}
+.stepper button:not(:disabled):hover {
+  border-color: var(--fg);
+}
+
+.clock {
+  font-size: 44px;
+  font-weight: 700;
+  min-width: 150px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.kind-label {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.category-picker {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.category-picker:hover {
+  border-color: var(--fg);
+}
+
+.today-row {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 16px;
+}
+
+.primary-btn {
+  background: var(--fg);
+  color: #000;
+  border: none;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.primary-btn:hover {
+  opacity: 0.85;
+}
+
+.secondary-btn {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.secondary-btn:hover {
+  border-color: var(--fg);
+}
+
+/* ---- running screen ---- */
+
+.progress-track {
+  height: 3px;
+  background: var(--border);
+  width: 100%;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--fg);
+  width: 0%;
+}
+.progress-fill.ring {
+  background: var(--ring);
+}
+
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+.clock.ring {
+  color: var(--ring);
+}
+
+/* ---- ringing screen ---- */
+
+.alert {
+  border: 1px solid var(--fg);
+  padding: 12px 14px;
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+.btn-row > * {
+  flex: 1;
+}
+
+/* ---- category list dialog ---- */
+
+.cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.cat-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cat-item:hover {
+  border-color: var(--fg);
+}
+.cat-item.selected {
+  border-color: var(--fg);
+  background: #111;
+}
+.private-badge {
+  color: var(--muted);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field input[type="text"] {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--fg);
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
