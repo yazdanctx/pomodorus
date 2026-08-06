@@ -12,6 +12,16 @@ test("plain profanity is caught", () => {
   }
 });
 
+test("additional Persian and English terms are caught", () => {
+  for (const text of [
+    "حروم زاده", "کره خر", "سگ مصب", "ابنه", "لواط", "زناکار", "بگا",
+    "retard", "dyke", "wanker", "shithead", "dumbass", "fap", "fapping",
+    "pedo", "molest",
+  ]) {
+    assert.equal(isProfane(text), true, text);
+  }
+});
+
 test("a profane word anywhere in a label takes the label", () => {
   assert.equal(isProfane("مطالعه و سکس"), true);
   assert.equal(isProfane("!!!کیر"), true);

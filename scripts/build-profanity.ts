@@ -66,7 +66,8 @@ const EXTRA_FA = `
   مردک, الدنگ, گمشو, بی همه چیز, بیهمهچیز, جندت,
   تخم سگ, تخمه سگ, بیناموسی, بی ناموس, بیشرف,
   خارکصده, خارکوسده, کسننت, کصننت, کس ننه, کیرم دهنت, کیرم تو دهنت,
-  اوسگول, شاسگول, جاکشی, دیوثی, حرومزادگی
+  اوسگول, شاسگول, جاکشی, دیوثی, حرومزادگی,
+  حروم زاده, کره خر, سگ مصب, ابنه, لواط, زناکار, بگا
 `;
 
 /**
@@ -82,6 +83,7 @@ const EXTRA_LATIN_WORDS = `
   kos koss kus koos kir kyr kun koon kuni kooni koony gooz gouz goh gouh chos
   jagh jaq sik shash sex sexy sexi sexs jende oskol oskul obne dayoos dayous
   dayus divoos kharkos kirkhar bangi jinda tokhm tokhmi nnto wtf
+  retard dyke wanker shithead dumbass fap fapping pedo molest
 `;
 
 /** Latin, matched anywhere: long enough that nothing innocent contains them. */
