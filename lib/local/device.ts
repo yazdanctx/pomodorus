@@ -35,6 +35,8 @@ export type Command =
   | { type: "selectCategory"; clientId: string | null }
   | { type: "setSetting"; key: RangeKey; value: number }
   | { type: "startWork"; fast: boolean }
+  | { type: "pauseWork" }
+  | { type: "resumeWork" }
   /** Acknowledge the ringing session. The only thing that ends a ring. */
   | { type: "confirm" }
   /** Acknowledge a ringing break and go straight back to work on the same task. */
@@ -95,9 +97,47 @@ export function apply(state: LocalState, command: Command, env: Env): Applied {
         return { state: s, rejected: copy.errors.categoryNotFound };
       }
       return { state: begin(s, s.selectedCategoryId, command.fast, env) };
-    }
+          }
 
-    case "confirm": {
+          case "pauseWork": {
+            if (!s.running || s.running.kind !== "work") {
+              return { state: s, rejected: copy.errors.nothingRunning };
+            }
+            if (s.running.pausedAt !== null) {
+              return { state: s, rejected: "Already paused" };
+            }
+            return {
+              state: {
+                ...s,
+                running: {
+                  ...s.running,
+                  pausedAt: env.now,
+                },
+              },
+            };
+          }
+
+          case "resumeWork": {
+            if (!s.running || s.running.kind !== "work") {
+              return { state: s, rejected: copy.errors.nothingRunning };
+            }
+            if (s.running.pausedAt == null) {
+              return { state: s, rejected: "Not paused" };
+            }
+            const pauseDuration = env.now - (s.running.pausedAt ?? 0);
+            return {
+              state: {
+                ...s,
+                running: {
+                  ...s.running,
+                  pausedAt: null,
+                  pausedDurationMs: (s.running.pausedDurationMs || 0) + pauseDuration,
+                },
+              },
+            };
+          }
+
+          case "confirm": {
       const ring = s.ringing;
       if (!ring) return { state: s, rejected: copy.errors.nothingRinging };
       // Ring time was rest, so it is spent out of the break rather than added
@@ -311,6 +351,8 @@ function begin(
       durationMs: s.settings.workMinutes * MINUTE_MS,
       shortBreakMs: s.settings.shortBreakMinutes * MINUTE_MS,
       longBreakMs: s.settings.longBreakMinutes * MINUTE_MS,
+      pausedAt: null,
+      pausedDurationMs: 0,
       ...(fast ? { devFast: true } : {}),
     },
   };
@@ -329,9 +371,9 @@ function begin(
  */
 function settled(state: LocalState, env: Env): LocalState {
   const running = state.running;
-  if (!running || endAt(running) > env.now) return state;
+  if (!running || endAt(running, env.now) > env.now) return state;
 
-  const end = endAt(running);
+  const end = endAt(running, env.now);
   // Decided once, here, and never revisited: within the window the app was
   // there to hear the bell; outside it, this is a ring being discovered on a
   // launch long afterwards.

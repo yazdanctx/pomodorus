@@ -16,6 +16,10 @@ export type RunningSession = {
   startedAt: number;
   durationMs: number; // nominal; a devFast session really ends after 3s
   devFast?: boolean;
+  /** When the session was paused, or null if running. */
+  pausedAt?: number | null;
+  /** Total paused duration accumulated so far (ms). */
+  pausedDurationMs?: number;
   // The break lengths this work session owes, snapshotted at start so that
   // editing settings mid-session cannot change the break it hands you. Both
   // are carried because which one is owed depends on the cycle counter at
@@ -180,8 +184,14 @@ export const AUDIBLE_WINDOW_MS = 60_000;
 export const FAST_MS = 3_000;
 
 /** The wall-clock moment a running session actually ends. */
-export function endAt(running: RunningSession): number {
-  return running.startedAt + (running.devFast ? FAST_MS : running.durationMs);
+export function endAt(running: RunningSession, now: number): number {
+  // Time spent paused (accumulated on resume, plus the in-progress pause).
+  const pausedNow = running.pausedAt != null ? now - running.pausedAt : 0;
+  const totalPause = (running.pausedDurationMs ?? 0) + pausedNow;
+  // The end shifts forward by every paused millisecond, so the countdown
+  // holds steady while paused and resumes where it left off.
+  const base = running.devFast ? FAST_MS : running.durationMs;
+  return running.startedAt + base + totalPause;
 }
 
 export const EMPTY_STATE: LocalState = {

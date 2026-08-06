@@ -75,8 +75,8 @@ export function NavBar() {
   if (HIDE_ON.includes(pathname)) return null;
 
   const running = state.running;
-  const ringing = state.ringing;
-  const remainingMs = running ? Math.max(0, endAt(running) - now) : null;
+    const ringing = state.ringing;
+    const remainingMs = running ? Math.max(0, endAt(running, now) - now) : null;
 
   return (
     // h-14 rather than padding alone: the bar keeps its height even in the

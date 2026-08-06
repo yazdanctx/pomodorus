@@ -10,6 +10,7 @@ import Image from "next/image";
 import { api } from "@/convex/_generated/api";
 import { DayCard, useBanner } from "@/components/day-card";
 import { FocusChart } from "@/components/focus-chart";
+import { MotivationButton } from "@/components/motivation-button";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { copy, t } from "@/lib/copy";
@@ -147,7 +148,10 @@ export function Profile({
           the row does not grow under the page when auth resolves. */}
       <div className="flex h-8 items-center justify-between gap-3">
         <h1 className="text-base font-medium">{copy.profile.title}</h1>
-        {isOwner && <SignOutButton />}
+        <div className="flex items-center gap-2">
+          {isOwner && <SignOutButton />}
+          <MotivationButton />
+        </div>
       </div>
 
       {/* Every state below opens on one `mt-8`. The gap used to be that plus a

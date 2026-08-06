@@ -234,6 +234,16 @@ export function startWork(fast: boolean) {
   dispatch({ type: "startWork", fast });
 }
 
+/** Pause the running work session. */
+export function pauseWork() {
+  dispatch({ type: "pauseWork" });
+}
+
+/** Resume the paused work session. */
+export function resumeWork() {
+  dispatch({ type: "resumeWork" });
+}
+
 /** Remember the picked task, so a reload doesn't lose it. */
 export function selectCategory(clientId: string | null) {
   dispatch({ type: "selectCategory", clientId });

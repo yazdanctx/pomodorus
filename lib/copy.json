@@ -64,7 +64,9 @@
     "settingsDone": "باشه",
     "count": "{n} تا",
     "todaySummary": "امروز {count} تا — {duration}",
-    "todayEmpty": "امروز تمرکز نکردی کلا"
+    "todayEmpty": "امروز تمرکز نکردی کلا",
+    "motivation": "انگیزه",
+    "motivationAnother": "یکی دیگه!"
   },
   "feed": {
     "title": "کیا آنلاینن؟",

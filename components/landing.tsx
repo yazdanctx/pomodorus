@@ -12,6 +12,7 @@ import Link from "next/link";
 import { FaGithub } from "react-icons/fa6";
 import { Feed } from "@/components/feed";
 import { LandingCta } from "@/components/landing-cta";
+import { MotivationButton } from "@/components/motivation-button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { copy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
@@ -98,6 +99,7 @@ export function Landing() {
               <FaGithub className="size-5" />
               {copy.landing.github}
             </Link>
+            <MotivationButton />
           </div>
         </section>
 
