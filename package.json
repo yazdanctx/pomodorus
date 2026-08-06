@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "build:extension": "esbuild chrome-extension/build/convex-entry.js --bundle --format=esm --platform=browser --target=es2022 --outfile=chrome-extension/lib/vendor/convex.bundle.js"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",
@@ -39,6 +40,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "convex-test": "^0.0.54",
+    "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",

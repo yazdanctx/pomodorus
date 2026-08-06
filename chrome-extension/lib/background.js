@@ -7,9 +7,11 @@
 import * as engine from "./engine.js";
 import * as storage from "./storage.js";
 import * as actions from "./actions.js";
+import * as sync from "./sync.js";
 
 const RING_ALARM = "pomodorus-ring";
 const TICK_ALARM = "pomodorus-tick";
+const SYNC_ALARM = "pomodorus-sync";
 
 async function scheduleAlarms() {
   const state = await storage.getState();
@@ -84,9 +86,21 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+chrome.alarms.create(SYNC_ALARM, { periodInMinutes: 2 });
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === SYNC_ALARM) {
+    await sync.syncNow().catch(() => {});
+  }
+});
+
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes["pomodorus.state"]) {
-    scheduleAlarms();
+  if (area !== "local") return;
+  if (changes["pomodorus.state"]) scheduleAlarms();
+  if (changes["pomodorus.auth"] && changes["pomodorus.auth"].newValue) {
+    sync
+      .claimLocalDataOnSignIn()
+      .then(() => sync.syncNow())
+      .catch(() => {});
   }
 });
 

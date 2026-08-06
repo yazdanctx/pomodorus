@@ -1,15 +1,23 @@
 import * as engine from "../lib/engine.js";
 import * as storage from "../lib/storage.js";
 import * as actions from "../lib/actions.js";
+import * as categoriesLib from "../lib/categories.js";
+import * as backend from "../lib/backend.js";
+import * as sync from "../lib/sync.js";
 
 const screenEl = document.getElementById("screen");
+const navEl = document.getElementById("nav");
 const settingsBtn = document.getElementById("settingsBtn");
 
-let state, settings, categories, selectedCategoryId;
+let state, settings, categories, selectedCategoryId, auth;
 let workMinutesDraft = engine.DEFAULT_SETTINGS.work;
+let tab = "timer"; // 'timer' | 'feed' | 'account'
 let ticker = null;
+let feedTicker = null;
 let audio = null;
 let lastAudibleRingSince = null;
+let loginError = "";
+let loginBusy = false;
 
 settingsBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
@@ -18,6 +26,7 @@ async function loadAll() {
   settings = await storage.getSettings();
   categories = await storage.getCategories();
   selectedCategoryId = await storage.getSelectedCategoryId();
+  auth = await storage.getAuth();
   if (state.workMinutes) workMinutesDraft = state.workMinutes;
 }
 
@@ -33,7 +42,7 @@ function startTicker() {
     const before = state.phase;
     state = await actions.refresh();
     if (state.phase !== before) settings = await storage.getSettings();
-    render();
+    if (tab === "timer") render();
   }, 1000);
 }
 
@@ -55,9 +64,43 @@ function selectedCategory() {
   return categories.find((c) => c.id === selectedCategoryId) ?? null;
 }
 
+function setTab(next) {
+  tab = next;
+  stopFeedPolling();
+  render();
+}
+
+function renderNav() {
+  navEl.hidden = false;
+  navEl.replaceChildren(
+    navTab("timer", "تایمر"),
+    navTab("feed", "کیا آنلاینن؟"),
+    navTab("account", auth ? "اکانت" : "لاگین")
+  );
+}
+
+function navTab(id, label) {
+  return h(
+    "button",
+    { class: `nav-tab${tab === id ? " active" : ""}`, onclick: () => setTab(id) },
+    label
+  );
+}
+
 function render() {
+  renderNav();
   screenEl.replaceChildren();
   manageAudio();
+
+  if (tab === "feed") {
+    screenEl.append(renderFeed());
+    startFeedPolling();
+    return;
+  }
+  if (tab === "account") {
+    screenEl.append(auth ? renderAccount() : renderLogin());
+    return;
+  }
 
   switch (state.phase) {
     case "idle":
@@ -133,17 +176,15 @@ function renderStart() {
     ]
   );
 
-  const today = h("div", { class: "today-row" }, todaySummaryText());
+  const today = h("div", { class: "today-row" }, "");
+  renderTodayInto(today);
 
   const startBtn = h(
     "button",
     {
       class: "primary-btn",
       onclick: async () => {
-        state = await actions.start({
-          categoryId: selectedCategoryId,
-          workMinutes: workMinutesDraft,
-        });
+        state = await actions.start({ category: cat, workMinutes: workMinutesDraft });
         render();
       },
     },
@@ -154,24 +195,29 @@ function renderStart() {
   return wrap;
 }
 
-function todaySummaryText() {
+async function renderTodayInto(el) {
+  if (auth) {
+    try {
+      const remote = await backend.todayFocusRemote();
+      el.textContent =
+        remote && remote.count > 0
+          ? `امروز ${toFa(remote.count)} تا — ${formatMinutes(Math.round(remote.totalMs / 60000))}`
+          : "امروز تمرکز نکردی کلا";
+      return;
+    } catch {
+      // fall through to local
+    }
+  }
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  return renderTodayAsync(startOfDay);
-}
-
-function renderTodayAsync(startOfDay) {
-  const el = h("span", {}, "");
-  storage.getHistory().then((history) => {
-    const todays = history.filter((s) => s.completedAt >= startOfDay);
-    if (todays.length === 0) {
-      el.textContent = "امروز تمرکز نکردی کلا";
-      return;
-    }
-    const totalMinutes = todays.reduce((sum, s) => sum + s.durationMinutes, 0);
-    el.textContent = `امروز ${toFa(todays.length)} تا — ${formatMinutes(totalMinutes)}`;
-  });
-  return el;
+  const history = await storage.getHistory();
+  const todays = history.filter((s) => s.completedAt >= startOfDay);
+  el.textContent =
+    todays.length === 0
+      ? "امروز تمرکز نکردی کلا"
+      : `امروز ${toFa(todays.length)} تا — ${formatMinutes(
+          todays.reduce((sum, s) => sum + s.durationMinutes, 0)
+        )}`;
 }
 
 // ---------- running screen ----------
@@ -349,7 +395,7 @@ function openCategoryDialog() {
   }
 
   const nameInput = h("input", { type: "text", placeholder: "اسم تسک" });
-  const publicCheck = h("input", { type: "checkbox" });
+  const publicCheck = h("input", { type: "checkbox", checked: "" });
   const field = h("div", { class: "field" }, [
     nameInput,
     h("label", { class: "checkbox-row" }, [publicCheck, "پابلیک باشه؟ (اسمش تو فید دیده میشه)"]),
@@ -360,9 +406,8 @@ function openCategoryDialog() {
         onclick: async () => {
           const name = nameInput.value.trim();
           if (!name || name.length > 40) return;
-          const id = crypto.randomUUID();
-          categories.push({ id, name, public: publicCheck.checked, createdAt: Date.now() });
-          await storage.setCategories(categories);
+          const id = await categoriesLib.createCategory({ name, isPublic: publicCheck.checked });
+          categories = await storage.getCategories();
           selectedCategoryId = id;
           await storage.setSelectedCategoryId(id);
           document.body.removeChild(overlay);
@@ -384,11 +429,188 @@ function openCategoryDialog() {
   document.body.append(overlay);
 }
 
+// ---------- login ----------
+
+function renderLogin() {
+  const wrap = h("div", { class: "login" });
+  wrap.append(h("div", { class: "kind-label" }, "لاگینش خیلی سادست"));
+  wrap.append(
+    h(
+      "div",
+      { class: "login-lead" },
+      "فقط یه یوزرنیم پسورد بزنی اکانتت ساخته میشه و لاگین میشی. ریست پسوورد نداریم."
+    )
+  );
+
+  const userInput = h("input", { type: "text", placeholder: "یوزرنیم" });
+  const passInput = h("input", { type: "password", placeholder: "پسورد" });
+  const hint = h("div", { class: "field-hint" }, "حروف انگلیسی کوچیک، عدد و آندرلاین");
+
+  const errorBox = h("div", {});
+  if (loginError) errorBox.append(h("div", { class: "alert" }, loginError));
+
+  const submitBtn = h(
+    "button",
+    {
+      class: "primary-btn",
+      onclick: async () => {
+        if (loginBusy) return;
+        loginBusy = true;
+        loginError = "";
+        render();
+        try {
+          await backend.signIn(userInput.value, passInput.value);
+          auth = await storage.getAuth();
+          loginBusy = false;
+          tab = "account";
+          render();
+        } catch (err) {
+          loginBusy = false;
+          loginError = backend.describeError(err);
+          render();
+        }
+      },
+    },
+    loginBusy ? "صبر کن…" : "بزن بریم"
+  );
+
+  wrap.append(
+    h("div", { class: "field" }, [userInput, hint]),
+    h("div", { class: "field" }, [passInput]),
+    errorBox,
+    submitBtn
+  );
+  return wrap;
+}
+
+// ---------- account / profile ----------
+
+function renderAccount() {
+  const wrap = h("div", { class: "account" });
+  wrap.append(h("div", { class: "clock" }, "@" + auth.username));
+
+  const chartHost = h("div", { class: "chart-host" }, "در حال بارگذاری…");
+  wrap.append(chartHost);
+  loadProfileChart(chartHost);
+
+  const signOutBtn = h(
+    "button",
+    {
+      class: "secondary-btn",
+      onclick: async () => {
+        await backend.signOut();
+        auth = null;
+        categories = await storage.getCategories();
+        tab = "timer";
+        render();
+      },
+    },
+    "لاگ اوت کن"
+  );
+  wrap.append(signOutBtn);
+  return wrap;
+}
+
+async function loadProfileChart(host) {
+  try {
+    const chart = await backend.profileChart(auth.username, 7);
+    host.replaceChildren(renderChart(chart));
+  } catch (err) {
+    host.replaceChildren(h("div", { class: "alert" }, backend.describeError(err)));
+  }
+}
+
+function renderChart(chart) {
+  if (!chart || chart.days.length === 0) return h("div", { class: "today-row" }, "چیزی نیست هنوز");
+  const days = chart.days;
+  const maxMs = Math.max(1, ...days.map((d) => d.totalMs));
+  const w = 300;
+  const barW = w / days.length - 4;
+  const barsHeight = 80;
+
+  const svgNs = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNs, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${barsHeight + 20}`);
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", barsHeight + 20);
+
+  days.forEach((d, i) => {
+    const barH = Math.max(1, (d.totalMs / maxMs) * barsHeight);
+    const rect = document.createElementNS(svgNs, "rect");
+    rect.setAttribute("x", String(i * (barW + 4)));
+    rect.setAttribute("y", String(barsHeight - barH));
+    rect.setAttribute("width", String(barW));
+    rect.setAttribute("height", String(barH));
+    rect.setAttribute("fill", d.totalMs > 0 ? "#ffffff" : "#2a2a2a");
+    svg.append(rect);
+  });
+
+  const wrap = h("div", {}, []);
+  wrap.append(svg);
+  const totalWeek = days.reduce((sum, d) => sum + d.totalMs, 0);
+  wrap.append(
+    h(
+      "div",
+      { class: "today-row" },
+      `۷ روز اخیر — ${formatMinutes(Math.round(totalWeek / 60000))}`
+    )
+  );
+  return wrap;
+}
+
+// ---------- feed ----------
+
+function startFeedPolling() {
+  if (feedTicker) return;
+  feedTicker = setInterval(async () => {
+    if (tab !== "feed") return stopFeedPolling();
+    await refreshFeedInto(document.getElementById("feedList"));
+  }, 4000);
+}
+
+function stopFeedPolling() {
+  if (feedTicker) {
+    clearInterval(feedTicker);
+    feedTicker = null;
+  }
+}
+
+function renderFeed() {
+  const wrap = h("div", { class: "feed" });
+  const list = h("div", { class: "cat-list", id: "feedList" }, "در حال بارگذاری…");
+  wrap.append(list);
+  refreshFeedInto(list);
+  return wrap;
+}
+
+async function refreshFeedInto(list) {
+  if (!list) return;
+  try {
+    const feed = await backend.activeFeed();
+    if (!feed || feed.length === 0) {
+      list.replaceChildren(h("div", { class: "today-row" }, "الان کسی آنلاین نیست 😴"));
+      return;
+    }
+    list.replaceChildren(
+      ...feed.map((item) => {
+        const statusText =
+          item.kind === "work" ? (item.label ? item.label : "یه تسک خصوصی") : "داره چیل می‌کنه";
+        return h("div", { class: "cat-item" }, [
+          h("span", {}, `${item.isMe ? "شما" : "@" + item.username}`),
+          h("span", { class: "private-badge" }, statusText),
+        ]);
+      })
+    );
+  } catch (err) {
+    list.replaceChildren(h("div", { class: "alert" }, backend.describeError(err)));
+  }
+}
+
 // ---------- audio ----------
 
 function manageAudio() {
   const ringing = state.phase === "work-ringing" || state.phase === "break-ringing";
-  if (!ringing || !state.audible) {
+  if (!ringing || !state.audible || tab !== "timer") {
     stopAudio();
     return;
   }

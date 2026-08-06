@@ -9,7 +9,57 @@ const KEYS = {
   categories: "pomodorus.categories",
   selectedCategoryId: "pomodorus.selectedCategoryId",
   history: "pomodorus.history",
+  auth: "pomodorus.auth", // { token, refreshToken, username } — device-local, never synced
+  pendingCategoryOps: "pomodorus.pendingCategoryOps",
+  pendingSessions: "pomodorus.pendingSessions",
 };
+
+export async function getAuth() {
+  const { [KEYS.auth]: auth } = await chrome.storage.local.get(KEYS.auth);
+  return auth ?? null;
+}
+
+export async function setAuth(auth) {
+  await chrome.storage.local.set({ [KEYS.auth]: auth });
+}
+
+export async function clearAuth() {
+  await chrome.storage.local.remove(KEYS.auth);
+}
+
+export async function getPendingCategoryOps() {
+  const { [KEYS.pendingCategoryOps]: ops } = await chrome.storage.local.get(
+    KEYS.pendingCategoryOps
+  );
+  return ops ?? [];
+}
+
+export async function setPendingCategoryOps(ops) {
+  await chrome.storage.local.set({ [KEYS.pendingCategoryOps]: ops });
+}
+
+export async function queueCategoryOp(op) {
+  const ops = await getPendingCategoryOps();
+  ops.push(op);
+  await setPendingCategoryOps(ops);
+}
+
+export async function getPendingSessions() {
+  const { [KEYS.pendingSessions]: sessions } = await chrome.storage.local.get(
+    KEYS.pendingSessions
+  );
+  return sessions ?? [];
+}
+
+export async function setPendingSessions(sessions) {
+  await chrome.storage.local.set({ [KEYS.pendingSessions]: sessions });
+}
+
+export async function queuePendingSession(session) {
+  const sessions = await getPendingSessions();
+  sessions.push(session);
+  await setPendingSessions(sessions);
+}
 
 export async function getState() {
   const { [KEYS.state]: state } = await chrome.storage.local.get(KEYS.state);

@@ -8,7 +8,7 @@ Next.js (App Router) + Convex, TypeScript, Tailwind, shadcn/ui.
 - `CONTEXT.md` — the domain language. Read this before naming anything.
 - `docs/adr/` — decisions and why they were made. `0001` explains the local-first timer.
 - `DEPLOY.md` — production (Vercel + Convex).
-- `chrome-extension/` — a standalone, account-free Chrome extension port of the local timer. See [`chrome-extension/README.md`](chrome-extension/README.md).
+- `chrome-extension/` — a Chrome extension port of the timer, connected to the same production Convex backend (login, sync, feed, profile). See [`chrome-extension/README.md`](chrome-extension/README.md).
 
 ## Requirements
 

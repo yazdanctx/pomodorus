@@ -82,12 +82,76 @@ button {
   border-color: var(--fg);
 }
 
+.nav {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+.nav-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 10px 4px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.nav-tab:hover {
+  color: var(--fg);
+}
+.nav-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}
+
 .screen {
   flex: 1;
   padding: 20px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* ---- login ---- */
+
+.login-lead {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.field input[type="password"] {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.field input[type="password"]:focus {
+  outline: none;
+  border-color: var(--fg);
+}
+
+/* ---- account / chart ---- */
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.chart-host {
+  color: var(--muted);
+  font-size: 12px;
+}
+.chart-host svg {
+  display: block;
 }
 
 /* ---- start screen ---- */
