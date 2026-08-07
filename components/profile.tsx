@@ -64,7 +64,7 @@ function EmptyRange({
   username: string;
   banners: string[];
 }) {
-  const src = useBanner(banners, `${username}:empty`);
+  const { src } = useBanner(banners, `${username}:empty`);
 
   return (
     <div className="mt-6 flex flex-col items-center gap-6 border p-12 text-center sm:p-20">

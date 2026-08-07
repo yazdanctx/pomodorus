@@ -10,7 +10,13 @@ const IMAGE = /\.(avif|webp|png|jpe?g|gif)$/i;
 // Read once per server process; the directory only changes on deploy.
 let cached: string[] | undefined;
 
-/** Every image in public/banners as a URL path, sorted by filename. */
+/**
+ * Every image in public/banners as a URL path, sorted by filename.
+ *
+ * The sort is lexicographic, so the files are named `frieren-NN.avif` with the
+ * number zero-padded and contiguous — unpadded, `frieren-10` would sort ahead
+ * of `frieren-4`. Name a new one for the next free number.
+ */
 export function listBanners(): string[] {
   if (cached !== undefined) return cached;
   let files: string[] = [];

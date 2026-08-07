@@ -100,7 +100,8 @@
     "privateBucket": "[تسک خصوصی]",
     "noTask": "بدون تسک",
     "focusedHours": "ساعت کار متمرکز",
-    "downloadAria": "اسکرین شات"
+    "downloadAria": "اسکرین شات",
+    "shuffleAria": "عکس بعدی"
   },
   "offline": {
     "indicator": "آفلاینی — نگران نباش، همه‌چی سیو میشه و بعداً سینک میشه",

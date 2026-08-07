@@ -44,6 +44,35 @@ test("two users are keyed apart", () => {
   );
 });
 
+test("every image is used before any is used twice", () => {
+  const assignment = createBannerAssignment(BANNERS);
+  const drawn = ["a", "b", "c"].map((k) => assignment.for(k));
+  assert.equal(new Set(drawn).size, BANNERS.length);
+});
+
+test("a reroll moves the day off the picture it was showing", () => {
+  const assignment = createBannerAssignment(BANNERS);
+  const before = assignment.for("yazdan:2026-07-27");
+  assignment.reroll("yazdan:2026-07-27");
+  const after = assignment.for("yazdan:2026-07-27");
+  assert.notEqual(after, before);
+  // And it sticks: the reroll is the new assignment, not a one-off read.
+  assert.equal(assignment.for("yazdan:2026-07-27"), after);
+});
+
+test("a reroll tells subscribers", () => {
+  const assignment = createBannerAssignment(BANNERS);
+  let calls = 0;
+  const unsubscribe = assignment.subscribe(() => {
+    calls++;
+  });
+  assignment.reroll("yazdan:2026-07-27");
+  assert.equal(calls, 1);
+  unsubscribe();
+  assignment.reroll("yazdan:2026-07-27");
+  assert.equal(calls, 1);
+});
+
 test("a lone image repeats rather than vanishing", () => {
   const assignment = createBannerAssignment(["/banners/a.avif"]);
   assert.equal(assignment.for("a"), "/banners/a.avif");

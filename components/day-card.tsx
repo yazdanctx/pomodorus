@@ -1,7 +1,7 @@
 "use client";
 
 import { toSvg } from "html-to-image";
-import { ImageDown } from "lucide-react";
+import { ImageDown, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import {
   useCallback,
@@ -16,7 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { bannerFor } from "@/lib/banners";
+import { bannerAssignment } from "@/lib/banners";
 import { copy } from "@/lib/copy";
 import type { FocusDay, FocusSlice } from "@/lib/focus-history";
 import { faDate, faDuration, faHourClock } from "@/lib/format";
@@ -28,23 +28,31 @@ function sliceLabel(slice: FocusSlice): string {
     : copy.profile.noTask;
 }
 
-// The assignment never changes after mount, so there is nothing to subscribe to.
-const noSubscribe = () => () => {};
-
 /**
- * The image for `key`, from the visit's banner assignment.
+ * The image for `key`, from the visit's banner assignment, and the way to draw
+ * it again.
  *
  * The draw has to happen on the client — a cached server render would hand
  * every visitor the same sequence — so it goes through useSyncExternalStore:
  * null while rendering on the server and during hydration, the assigned image
- * immediately after.
+ * immediately after. Subscribing is what makes `reroll` show up on screen.
  */
-export function useBanner(banners: string[], key: string): string | null {
-  const getSnapshot = useCallback(
-    () => bannerFor(banners, key),
-    [banners, key],
+export function useBanner(
+  banners: string[],
+  key: string,
+): { src: string | null; reroll: () => void } {
+  const assignment = bannerAssignment(banners);
+  const subscribe = useCallback(
+    (onChange: () => void) => assignment.subscribe(onChange),
+    [assignment],
   );
-  return useSyncExternalStore(noSubscribe, getSnapshot, () => null);
+  const getSnapshot = useCallback(
+    () => assignment.for(key),
+    [assignment, key],
+  );
+  const src = useSyncExternalStore(subscribe, getSnapshot, () => null);
+  const reroll = useCallback(() => assignment.reroll(key), [assignment, key]);
+  return { src, reroll };
 }
 
 /**
@@ -60,10 +68,6 @@ function usePreloadedBanners(banners: string[]) {
     }
   }, [banners]);
 }
-
-// Excluded from the capture via the `filter` below, so the control asking
-// for a screenshot never ends up inside it.
-const SCREENSHOT_IGNORE = "data-screenshot-ignore";
 
 // Padding for the *downloaded* image only — applied to html-to-image's
 // clone via `style`/`width`/`height`, which never touches the live node.
@@ -137,7 +141,7 @@ export function DayCard({
   usePreloadedBanners(banners);
   // Keyed by user, so navigating between two profiles doesn't hand them the
   // same sequence of images.
-  const src = useBanner(banners, `${username}:${day.dayKey}`);
+  const { src, reroll } = useBanner(banners, `${username}:${day.dayKey}`);
 
   const cardRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
@@ -149,8 +153,6 @@ export function DayCard({
     try {
       const svgDataUrl = await toSvg(node, {
         cacheBust: true,
-        filter: (el) =>
-          !(el instanceof HTMLElement && el.hasAttribute(SCREENSHOT_IGNORE)),
         width: node.clientWidth + CAPTURE_PAD_LEFT + CAPTURE_PAD_RIGHT,
         height: node.clientHeight + CAPTURE_PAD_TOP + CAPTURE_PAD_BOTTOM,
         backgroundColor: "#000000",
@@ -179,6 +181,47 @@ export function DayCard({
   // No rule above the card: the gap alone separates it from the chart.
   return (
     <section className="mt-10">
+      {/* Above the captured node rather than floating over the artwork, so the
+          controls need no stacking context of their own — and being outside
+          cardRef is what keeps them out of the screenshot, with no filtering.
+          justify-end puts them at the physical left under dir=rtl, over the
+          image they act on. icon-sm matches the dialog close button, the other
+          icon-only control in the app. */}
+      <div className="mb-2 flex justify-end gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={copy.profile.downloadAria}
+              disabled={downloading}
+              onClick={handleDownload}
+            >
+              <ImageDown />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {copy.profile.downloadAria}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={copy.profile.shuffleAria}
+              onClick={reroll}
+            >
+              <RefreshCw />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {copy.profile.shuffleAria}
+          </TooltipContent>
+        </Tooltip>
+      </div>
       {/*
         cardRef is the exact node html-to-image captures. It carries no
         classes of its own — it's a passthrough wrapper purely so the ref
@@ -211,37 +254,17 @@ export function DayCard({
               {copy.profile.focusedHours}
             </p>
           </div>
-          <div className="relative aspect-square w-1/2 shrink-0 overflow-hidden">
+          {/* Half the row on a phone, where the clock needs the space; from sm
+              up the container is already at its max-w-xl and the text has room
+              to spare, so the image takes 60% and the text the remaining 40%. */}
+          <div className="relative aspect-square w-1/2 shrink-0 overflow-hidden sm:w-[60%]">
             <div className="absolute inset-0 z-10 bg-linear-to-t from-background via-background/20 to-transparent" />
-            {/* Physical top-left, not the logical start/end — the outline
-                keeps it readable over the artwork without needing a
-                backdrop blur. icon-sm matches the dialog close button, the
-                other icon-only control in the app. */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  aria-label={copy.profile.downloadAria}
-                  disabled={downloading}
-                  onClick={handleDownload}
-                  {...{ [SCREENSHOT_IGNORE]: "" }}
-                  className="absolute top-2 left-2 z-20"
-                >
-                  <ImageDown />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {copy.profile.downloadAria}
-              </TooltipContent>
-            </Tooltip>
             {src !== null && (
               <Image
                 src={src}
                 alt=""
                 fill
-                sizes="(max-width: 32rem) 50vw, 16rem"
+                sizes="(max-width: 40rem) 50vw, 22rem"
                 // The sources are already hand-optimised AVIF (~10 KB each);
                 // running them through the optimiser would re-encode them to a
                 // larger WebP.
