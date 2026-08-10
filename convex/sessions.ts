@@ -12,6 +12,17 @@ async function requireUserId(ctx: MutationCtx) {
 }
 
 /**
+ * Usernames held at the top of the feed, in order, whenever they are live.
+ * Everyone else sorts below them by start time.
+ */
+const PINNED_USERNAMES = ["yazdanctx", "matinsenpai"];
+
+function pinnedRank(username: string) {
+  const i = PINNED_USERNAMES.indexOf(username);
+  return i === -1 ? PINNED_USERNAMES.length : i;
+}
+
+/**
  * Advertise the running session to the feed. Best-effort presence, not
  * truth (docs/adr/0001-local-first-timer.md): the row self-expires at
  * startedAt + durationMs, so an offline cancel goes stale for at most one
@@ -87,8 +98,9 @@ export const activeFeed = query({
       });
     }
     feed.sort((a, b) => {
-      if (a.username === "yazdanctx" && b.username !== "yazdanctx") return -1;
-      if (b.username === "yazdanctx" && a.username !== "yazdanctx") return 1;
+      const rankA = pinnedRank(a.username);
+      const rankB = pinnedRank(b.username);
+      if (rankA !== rankB) return rankA - rankB;
       return a.startedAt - b.startedAt;
     });
     return feed;
