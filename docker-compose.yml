@@ -1,0 +1,41 @@
+# Local dependencies only. The Go server and the Vite dev server run on the
+# host (`make dev`), because a rebuild loop through Docker is slower than the
+# thing it would be containerising.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: pomodorus-postgres
+    environment:
+      POSTGRES_USER: pomodorus
+      POSTGRES_PASSWORD: pomodorus
+      POSTGRES_DB: pomodorus
+      # The app stores every instant as UTC epoch millis and does its Tehran
+      # day bucketing explicitly, so the server's own timezone must never be
+      # allowed to matter.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pomodorus -d pomodorus"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Fake SMTP with a web inbox, so login codes are readable locally without a
+  # provider — and, more importantly, so the SMTP code path in the server is
+  # the same one that runs in production instead of a dev-only branch.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: pomodorus-mailpit
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # web UI — http://localhost:8025
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  pgdata:

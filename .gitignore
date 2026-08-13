@@ -1,49 +1,24 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
 .DS_Store
-*.pem
 
-# self-signed certs from `next dev --experimental-https`
-/certificates
+# Node
+node_modules/
+*.log
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# Build output
+bin/
+# The client is built into the Go binary's embed directory; the directory is
+# tracked (embed needs it to exist) but its contents never are.
+server/internal/web/dist/*
+!server/internal/web/dist/.gitkeep
 
-# env files (can opt-in for committing if needed)
-.env*
-# committed on purpose: only the public production Convex URL
-!.env.production
+# Env — every secret lives here and none of it is committed.
+.env
+.env.*
+!.env.example
 
-# vercel
-.vercel
+# Playwright
+test-results/
+playwright-report/
 
-# per-machine Claude Code permissions; shared config goes in .claude/settings.json
-.claude/settings.local.json
-
-# typescript
+# TypeScript incremental build state
 *.tsbuildinfo
-next-env.d.ts

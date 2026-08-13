@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* The design is carried over unchanged from v1; the values below are the ones
+   recorded in docs/design-tokens.md, not re-picked. Anything that looks
+   arbitrary is load-bearing and has a note. */
+
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-Thin.woff2") format("woff2");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-ExtraLight.woff2") format("woff2");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-Black.woff2") format("woff2");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Peyda";
+  src: url("/fonts/PeydaFaNumWeb-ExtraBlack.woff2") format("woff2");
+  font-weight: 950;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* One fixed theme: pitch black, white text, monochrome. There is no light
+   mode, no toggle, and no `dark:` variant in play anywhere. */
+:root {
+  --background: oklch(0 0 0);
+  --foreground: oklch(1 0 0);
+  --card: oklch(0 0 0);
+  --card-foreground: oklch(1 0 0);
+  --popover: oklch(0 0 0);
+  --popover-foreground: oklch(1 0 0);
+  --primary: oklch(1 0 0);
+  --primary-foreground: oklch(0 0 0);
+  --secondary: oklch(0.2 0 0);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(0.2 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.2 0 0);
+  --accent-foreground: oklch(1 0 0);
+  /* Deliberately the same grey as --muted-foreground. The theme is
+     monochrome, so an error may not separate itself by hue — it separates
+     itself by being full white, boxed and iconned instead. */
+  --destructive: oklch(0.65 0 0);
+  --input: oklch(1 0 0 / 22%);
+  --ring: oklch(0.65 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  /* Flat: no corner radius anywhere. Every derived radius computes off this,
+     so they are all zero. */
+  --radius: 0rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* The one non-neutral value in the palette: a faintly warm grey, and the
+     only token that isn't oklch. Kept exactly as it was. */
+  --color-border: hsl(24 6% 25%);
+
+  --font-sans: "Peyda", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Peyda", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    /* A global scale-up, not a type choice: everything here is rem-based, so
+       type, spacing and control heights grow together. 16px was too small for
+       Persian text. Held one notch down on phones because at 18px the timer's
+       −/clock/+ row alone overflows a 360px frame.
+
+       The breakpoint matches Tailwind's `sm`. rem inside a media query is
+       always the browser's 16px, never this value. */
+    font-size: 106.25%;
+  }
+
+  @media (width >= 40rem) {
+    html {
+      font-size: 112.5%;
+    }
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    -webkit-font-smoothing: antialiased;
+    /* Backstop so a future one-off can't hand the page a horizontal
+       scrollbar. `clip` rather than `hidden`: `hidden` would make the body a
+       scroll container and break `position: sticky`. */
+    overflow-x: clip;
+  }
+}
