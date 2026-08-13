@@ -16,6 +16,24 @@ not follow patterns from that tree; it survives only as the design reference.
 | `docs/design-tokens.md` | The exact design values. Read before writing UI. |
 | `docs/reference/` | Screenshots of v1 — the pixel target. |
 | `docs/adr/` | Why the architecture is the way it is. |
+| `docs/agents/` | How the engineering skills read this repo. |
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues on `yazdanctx/pomodorus`, via the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` at the repo root plus `docs/adr/`. See
+`docs/agents/domain.md`.
 
 ## Running it
 
