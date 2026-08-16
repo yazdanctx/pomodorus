@@ -394,7 +394,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeTimerState(ctx, w, user, now)
+	s.writeTimerChange(ctx, w, user, now)
 }
 
 func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
@@ -438,8 +438,11 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Answering with the state afterwards rather than with nothing: the caller
-	// asked to change the timer and wants to know what the timer now is.
-	s.writeTimerState(ctx, w, user, now)
+	// asked to change the timer and wants to know what the timer now is. The
+	// other device wants to know the same thing and did not ask, which is what
+	// the push is for — a laptop left on a running countdown must not keep
+	// counting down something that was cancelled on a phone.
+	s.writeTimerChange(ctx, w, user, now)
 }
 
 // confirmSession acknowledges the bell, and starts whatever break survived it.
@@ -553,6 +556,11 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
+	// After the commit rather than before it, because a fact is not a fact
+	// until it is durable: a device told about the break this started, by a
+	// transaction that then rolled back, would be showing something that never
+	// happened.
+	s.publishTimer(ctx, user, state)
 }
 
 // startBreak begins the rest a just-acknowledged pomodoro owes, if any of it
@@ -606,12 +614,30 @@ func (s *Server) startBreak(ctx context.Context, q *db.Queries, user db.User, wo
 // writeTimerState answers with what the timer is. Every read and every write
 // ends this way rather than with nothing: the caller changed the timer, and
 // the next thing it would ask is what the timer now is.
-func (s *Server) writeTimerState(ctx context.Context, w http.ResponseWriter, user db.User, now time.Time) {
+//
+// It hands back what it answered, so a caller that must also push it does not
+// read the same thing twice — and cannot push a state that differs from the
+// one it just sent.
+func (s *Server) writeTimerState(ctx context.Context, w http.ResponseWriter, user db.User, now time.Time) (sessionResponse, bool) {
 	state, err := s.timerState(ctx, s.q, user, now)
 	if err != nil {
 		s.log.Error("read session", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "server_error")
-		return
+		return sessionResponse{}, false
 	}
 	writeJSON(w, http.StatusOK, state)
+	return state, true
+}
+
+// writeTimerChange is writeTimerState for a handler that changed something: the
+// caller is answered, and the person's other devices are told the same thing.
+//
+// The two are separate rather than one function with a flag because the
+// distinction is the whole transport rule — a read answers the reader, a write
+// is a fact and facts are what the socket carries. Pushing on a read would put
+// a frame on the wire for every tab that merely looked.
+func (s *Server) writeTimerChange(ctx context.Context, w http.ResponseWriter, user db.User, now time.Time) {
+	if state, ok := s.writeTimerState(ctx, w, user, now); ok {
+		s.publishTimer(ctx, user, state)
+	}
 }

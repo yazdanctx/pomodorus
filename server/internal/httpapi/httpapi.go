@@ -16,6 +16,7 @@ import (
 	"github.com/yazdanctx/pomodorus/server/internal/auth"
 	"github.com/yazdanctx/pomodorus/server/internal/clock"
 	"github.com/yazdanctx/pomodorus/server/internal/config"
+	"github.com/yazdanctx/pomodorus/server/internal/live"
 	"github.com/yazdanctx/pomodorus/server/internal/mail"
 	"github.com/yazdanctx/pomodorus/server/internal/store/db"
 	"github.com/yazdanctx/pomodorus/server/internal/web"
@@ -31,28 +32,49 @@ type Deps struct {
 	Log    *slog.Logger
 	Clock  clock.Clock
 	Mailer mail.Mailer
+
+	// Live is fan-out to the sockets. It defaults to the in-process hub, which
+	// is all a single instance needs; this field is the seam a second instance
+	// would swap for Postgres LISTEN/NOTIFY, and the handlers would not notice.
+	Live live.Broadcaster
+
+	// SocketPing is the keepalive interval, defaulting to DefaultSocketPing. It
+	// is real time rather than the injected clock — it is a fact about the
+	// network and the proxy in front of it, not about the timer — so a test
+	// that wants to watch a socket idle turns it down instead of moving a clock.
+	SocketPing time.Duration
 }
 
 type Server struct {
-	cfg   config.Config
-	db    *pgxpool.Pool
-	q     *db.Queries
-	log   *slog.Logger
-	clock clock.Clock
-	auth  *auth.Service
-	mux   *http.ServeMux
+	cfg        config.Config
+	db         *pgxpool.Pool
+	q          *db.Queries
+	log        *slog.Logger
+	clock      clock.Clock
+	auth       *auth.Service
+	live       live.Broadcaster
+	socketPing time.Duration
+	mux        *http.ServeMux
 }
 
 func New(deps Deps) *Server {
 	queries := db.New(deps.DB)
 	s := &Server{
-		cfg:   deps.Config,
-		db:    deps.DB,
-		q:     queries,
-		log:   deps.Log,
-		clock: deps.Clock,
-		auth:  auth.NewService(queries, deps.Clock, deps.Mailer),
-		mux:   http.NewServeMux(),
+		cfg:        deps.Config,
+		db:         deps.DB,
+		q:          queries,
+		log:        deps.Log,
+		clock:      deps.Clock,
+		auth:       auth.NewService(queries, deps.Clock, deps.Mailer),
+		live:       deps.Live,
+		socketPing: deps.SocketPing,
+		mux:        http.NewServeMux(),
+	}
+	if s.live == nil {
+		s.live = live.NewHub()
+	}
+	if s.socketPing <= 0 {
+		s.socketPing = DefaultSocketPing
 	}
 	s.routes()
 	return s
@@ -84,6 +106,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/session/start", s.startSession)
 	s.mux.HandleFunc("POST /api/session/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("POST /api/session/{id}/confirm", s.confirmSession)
+
+	// The one route that is not HTTP-shaped, and it carries nothing upstream:
+	// facts are pushed down it, and every change to the timer still arrives as
+	// one of the posts above.
+	s.mux.HandleFunc("GET /ws", s.socket)
 
 	if h, ok := web.Handler(); ok {
 		s.mux.Handle("/", h)

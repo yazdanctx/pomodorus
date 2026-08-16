@@ -75,5 +75,5 @@ func (s *Server) setIntervals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeTimerState(ctx, w, updated, s.now())
+	s.writeTimerChange(ctx, w, updated, s.now())
 }

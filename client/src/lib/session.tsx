@@ -10,6 +10,7 @@ import {
 import { get, post, type ServerTimed } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CLASSIC, type Intervals } from "@/lib/intervals";
+import { isTimerFrame, useSocket, type Frame } from "@/lib/socket";
 
 export type Kind = "work" | "shortBreak" | "longBreak";
 
@@ -160,6 +161,12 @@ function useFetchedSession(disabled: boolean): SessionValue {
 
   // Every answer about the timer carries all three, so they can never disagree:
   // the dots, the clock and the dialog are readings of one payload.
+  //
+  // The payload's `serverNow` is folded into the clock anchor by the transport
+  // and not here, because only a request can be timed: a response arrives with
+  // a round trip to halve, and a pushed frame arrives with a one-way latency
+  // that cannot be measured — treating it as instant would drag the anchor
+  // backwards on every push.
   const receive = useCallback((payload: SessionPayload) => {
     setSession(payload.session);
     setCycle(payload.cycle);
@@ -186,12 +193,31 @@ function useFetchedSession(disabled: boolean): SessionValue {
     void reload().catch(() => setSession(null));
   }, [disabled, signedIn, reload]);
 
+  // One timer, on every device at once.
+  //
+  // What arrives is the whole state rather than a nudge to go and ask, so a
+  // pomodoro started on a phone is on the laptop in one hop — with the same
+  // instants, and therefore the same digits.
+  //
+  // The socket is held open only while there is somebody to hold it for, and
+  // the first frame after every connection is the current answer, so opening
+  // the app and coming back from a tunnel are the same case.
+  useSocket(
+    !disabled && signedIn,
+    useCallback(
+      (frame: Frame) => {
+        if (isTimerFrame(frame)) receive(frame.timer as SessionPayload);
+      },
+      [receive],
+    ),
+  );
+
   // A tab that has been in the background can have missed anything the person
   // did elsewhere: a timer started on their phone, or the intervals edited on
-  // it. Asking again the moment it is looked at is what makes "on every device
-  // you have open" true without a socket to push it — and a failure here is
-  // left alone, because what is already on screen is still the last thing the
-  // server said.
+  // it. Kept alongside the socket rather than replaced by it, because a tab
+  // that was asleep may have had its socket quietly dropped and not yet
+  // noticed — and a failure here is left alone, because what is already on
+  // screen is still the last thing the server said.
   useEffect(() => {
     if (disabled || !signedIn) return;
     const refresh = () => {

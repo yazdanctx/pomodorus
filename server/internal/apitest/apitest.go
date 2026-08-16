@@ -61,18 +61,36 @@ type Harness struct {
 	*Client
 }
 
+// deployment is how the server under test is stood up — the facts about its
+// surroundings rather than about what it does.
+type deployment struct {
+	cfg       config.Config
+	overTLS   bool
+	pingEvery time.Duration
+}
+
 // An Option changes how the server under test is deployed, not what it does.
-type Option func(*config.Config, *bool)
+type Option func(*deployment)
 
 // BehindProxy stands the server behind a proxy that sets the forwarded
 // headers, and says those headers may be believed.
 func BehindProxy() Option {
-	return func(c *config.Config, _ *bool) { c.TrustProxyHeaders = true }
+	return func(d *deployment) { d.cfg.TrustProxyHeaders = true }
 }
 
 // OverTLS serves HTTPS, which is how production is reached.
 func OverTLS() Option {
-	return func(_ *config.Config, tls *bool) { *tls = true }
+	return func(d *deployment) { d.overTLS = true }
+}
+
+// Keepalive turns the socket's ping interval down, so a test can watch a
+// socket sit idle across several of them in a few milliseconds.
+//
+// Real time rather than the harness clock, deliberately: the keepalive is
+// about the proxy in front of the server dropping quiet connections, and that
+// proxy cannot be made to believe the test's clock.
+func Keepalive(every time.Duration) Option {
+	return func(d *deployment) { d.pingEvery = every }
 }
 
 // New starts a server on a freshly emptied schema.
@@ -85,20 +103,22 @@ func New(t *testing.T, options ...Option) *Harness {
 	fixed := clock.NewFixed(Origin)
 	inbox := mail.NewMemory()
 
-	cfg := config.Config{Env: "development", Addr: ":0"}
-	overTLS := false
+	stood := deployment{cfg: config.Config{Env: "development", Addr: ":0"}}
 	for _, option := range options {
-		option(&cfg, &overTLS)
+		option(&stood)
 	}
 
 	newServer := httptest.NewServer
-	if overTLS {
+	if stood.overTLS {
 		newServer = httptest.NewTLSServer
 	}
 
 	server := newServer(httpapi.New(httpapi.Deps{
-		Config: cfg,
+		Config: stood.cfg,
 		DB:     pool,
+		// Left at its default unless a test asked otherwise, so the socket
+		// under test is the one that ships.
+		SocketPing: stood.pingEvery,
 		// Discarded rather than routed to the test log: the handlers log
 		// server errors, and a test that deliberately provokes one should not
 		// look like a failure.
