@@ -1,7 +1,8 @@
 import { LogOut } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
+import { DayDetail } from "@/components/profile/day-detail";
 import { Failure } from "@/components/failure";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,7 +10,14 @@ import { post } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { copy, t } from "@/lib/copy";
 import { enDigits, faDigits } from "@/lib/format";
-import { DEFAULT_RANGE, RANGES, useProfile, type Range } from "@/lib/profile";
+import {
+  DEFAULT_RANGE,
+  RANGES,
+  selectDay,
+  useProfile,
+  type ChartDay,
+  type Range,
+} from "@/lib/profile";
 
 /**
  * Loaded only when somebody opens a profile.
@@ -36,7 +44,14 @@ export function ProfileRoute() {
   const { handle = "" } = useParams();
   const auth = useAuth();
   const [range, setRange] = useState<Range>(DEFAULT_RANGE);
-  const { handle: canonical, days, everFocused, missing, failed } = useProfile(handle, range);
+  const { handle: canonical, days, everFocused, owner, missing, failed } = useProfile(handle, range);
+  // The day being pointed at — a gesture rather than a fact about the profile,
+  // so it is held here and not in the payload. A day pointed at in one range
+  // and still present in the next stays selected; one that falls outside gives
+  // way to the most recent day with anything in it, which is what the page
+  // opens on.
+  const [pointed, setPointed] = useState<string | null>(null);
+  const selected = days === undefined ? null : selectDay(days, pointed);
 
   // Whose page this is. Compared against the canonical handle when there is
   // one, so a link typed in the wrong case still recognises its owner.
@@ -73,7 +88,16 @@ export function ProfileRoute() {
             <Empty />
           ) : (
             <Suspense fallback={<ChartSkeleton />}>
-              <FocusChart days={days} />
+              <FocusChart
+                days={days}
+                selected={selected?.day ?? null}
+                onSelect={setPointed}
+              />
+              <DayPanel
+                day={selected?.detail}
+                handle={canonical ?? handle}
+                owner={owner}
+              />
             </Suspense>
           )}
         </div>
@@ -81,6 +105,64 @@ export function ProfileRoute() {
     </main>
   );
 }
+
+/**
+ * The docked day detail, and the fade between one day and the next.
+ *
+ * The outgoing panel finishes leaving before the incoming one arrives, rather
+ * than the two dissolving through each other: they differ in height with the
+ * length of the task list, and running them together would shunt the page
+ * around under whoever is reading it.
+ *
+ * A day with nothing in it has no panel at all — not a panel that says ۰:۰۰
+ * over an empty list — so the fade is also how the panel goes away.
+ */
+function DayPanel({
+  day,
+  handle,
+  owner,
+}: {
+  day: ChartDay | undefined;
+  handle: string;
+  owner: boolean;
+}) {
+  const [shown, setShown] = useState(day);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (day?.day === shown?.day) {
+      // The same day, but possibly a fresher copy of it — a range switch
+      // re-fetches the days it already had.
+      if (day !== shown) setShown(day);
+      return;
+    }
+    setLeaving(true);
+    const handover = setTimeout(() => {
+      setShown(day);
+      setLeaving(false);
+    }, FADE_MS);
+    return () => clearTimeout(handover);
+  }, [day, shown]);
+
+  if (shown === undefined) return null;
+
+  return (
+    // Keyed by the day, so each one is its own arrival: the outgoing panel
+    // fades out on this element, and the incoming one is a fresh element that
+    // fades in.
+    <div
+      key={shown.day}
+      className={`duration-300 ease-out ${
+        leaving ? "opacity-0 transition-opacity" : "animate-in fade-in-0"
+      }`}
+    >
+      <DayDetail day={shown} handle={handle} owner={owner} />
+    </div>
+  );
+}
+
+/** Matches the `duration-300` the panel fades over. */
+const FADE_MS = 300;
 
 /** The chart area's exact box, held while either its code or its data arrives. */
 function ChartSkeleton() {

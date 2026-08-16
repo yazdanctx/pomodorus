@@ -130,13 +130,23 @@ ORDER BY sessions.started_at DESC;
 -- Bounded by `ends_at`, like every other read of credited work: it is when the
 -- bell went, and a pomodoro that began before Tehran midnight and rang after it
 -- belongs to the day it was credited in.
-SELECT ends_at, duration_ms FROM sessions
-WHERE user_id = sqlc.arg(user_id)
-  AND kind = 'work'
-  AND cancelled_at IS NULL
-  AND ends_at >= sqlc.arg(from_time)
-  AND ends_at <= sqlc.arg(to_time)
-ORDER BY ends_at;
+--
+-- The task comes back with the row, name and visibility both, because the day
+-- detail is built from the same pomodoros the line is. The join carries no
+-- `deleted_at` filter on purpose: a tombstoned category keeps its name and
+-- keeps appearing under it, since tidying a task list is not an edit to the
+-- history recorded against it. Whether a stranger may read that name is the
+-- application's question and not this query's — as in the feed.
+SELECT sessions.ends_at, sessions.duration_ms,
+       categories.name AS category_name, categories.is_public AS category_is_public
+FROM sessions
+LEFT JOIN categories ON categories.id = sessions.category_id
+WHERE sessions.user_id = sqlc.arg(user_id)
+  AND sessions.kind = 'work'
+  AND sessions.cancelled_at IS NULL
+  AND sessions.ends_at >= sqlc.arg(from_time)
+  AND sessions.ends_at <= sqlc.arg(to_time)
+ORDER BY sessions.ends_at;
 
 -- name: HasCreditedWork :one
 -- Whether this account has ever finished a pomodoro.

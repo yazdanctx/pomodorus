@@ -287,15 +287,19 @@ func (c *Client) do(method, path string, body any) *Response {
 		t:       c.t,
 		what:    method + " " + path,
 		Status:  res.StatusCode,
+		Header:  res.Header,
 		Body:    payload,
 		Cookies: res.Cookies(),
 	}
 }
 
 type Response struct {
-	t       *testing.T
-	what    string
-	Status  int
+	t      *testing.T
+	what   string
+	Status int
+	// What the response said to the caches between here and the reader — which
+	// for a page that answers two readers differently is part of what it means.
+	Header  http.Header
 	Body    []byte
 	Cookies []*http.Cookie
 }

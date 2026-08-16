@@ -10,11 +10,28 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, get, type ServerTimed } from "@/lib/api";
 
-/** One column: a Tehran day, and what was credited in it. */
+/**
+ * One row of a day's detail.
+ *
+ * `name` is null for the two rows that have none: a stranger's view of all the
+ * private tasks at once, and work recorded against no task at all. They are
+ * not the same row and they do not read the same — one is masking something
+ * and the other is not — so the kind is carried rather than inferred from the
+ * missing name.
+ */
+export type DayTask = {
+  kind: "task" | "private" | "none";
+  name: string | null;
+  totalMs: number;
+};
+
+/** One column: a Tehran day, what was credited in it, and what of. */
 export type ChartDay = {
   /** `YYYY-MM-DD` in Tehran. A day is a name, not an instant. */
   day: string;
   totalMs: number;
+  /** Largest first, and empty on a day with nothing in it. */
+  tasks: DayTask[];
 };
 
 /** The three presets. There is no custom picker, by design. */
@@ -26,6 +43,7 @@ type ProfilePayload = ServerTimed & {
   handle: string;
   days: ChartDay[];
   everFocused: boolean;
+  owner: boolean;
 };
 
 export type ProfileValue = {
@@ -43,6 +61,14 @@ export type ProfileValue = {
    * focused at all gets the empty state.
    */
   everFocused: boolean;
+  /**
+   * Whether the server is showing this reader the real task names, which it
+   * does only on their own profile. Said out loud on the page rather than
+   * inferred from the handle: only the server knows whose cookie this is, and
+   * seeing your private tasks named is exactly the moment you might think
+   * strangers can too.
+   */
+  owner: boolean;
   /** The read failed for a reason that is not "no such person". */
   failed: boolean;
 };
@@ -90,7 +116,54 @@ export function useProfile(handle: string, range: Range): ProfileValue {
     handle: profile?.handle,
     days: loading || failed ? undefined : profile?.days,
     everFocused: profile?.everFocused ?? false,
+    owner: profile?.owner ?? false,
     missing,
     failed,
   };
+}
+
+/** Which day the chart marks, and the detail docked below it. */
+export type Selection = {
+  /** Always a day in the range, so the chart has something to mark. */
+  day: string;
+  /**
+   * The day's detail, or undefined when the marked day is empty. The chart is
+   * zero-filled, so a flat stretch can still be pointed at — and such a day
+   * gets no panel at all rather than ۰:۰۰ over an empty list.
+   */
+  detail: ChartDay | undefined;
+};
+
+/**
+ * The day the profile is showing: the one being pointed at, or the most recent
+ * one with anything in it.
+ *
+ * Null when no day in the range has any focus time — a week off is a flat line
+ * and nothing more, with no marker on it and nothing docked below.
+ */
+export function selectDay(
+  days: ChartDay[],
+  pointed: string | null,
+): Selection | null {
+  const latest = lastDayWithFocus(days);
+  if (latest === undefined) return null;
+
+  // Pointing wins while it lands inside the range; otherwise the panel rests
+  // on the most recent day that has data, which is what the page opens on.
+  const day =
+    pointed !== null && days.some((column) => column.day === pointed)
+      ? pointed
+      : latest.day;
+
+  const marked = days.find((column) => column.day === day);
+  return { day, detail: marked !== undefined && marked.totalMs > 0 ? marked : undefined };
+}
+
+/** The most recent day carrying focus time. `days` is oldest first. */
+function lastDayWithFocus(days: ChartDay[]): ChartDay | undefined {
+  for (let i = days.length - 1; i >= 0; i--) {
+    const day = days[i];
+    if (day !== undefined && day.totalMs > 0) return day;
+  }
+  return undefined;
 }

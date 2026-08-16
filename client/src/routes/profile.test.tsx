@@ -1,24 +1,42 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Auth } from "@/lib/auth";
 import { copy, t } from "@/lib/copy";
-import { faDateShort, faDigits } from "@/lib/format";
+import { faDate, faDateShort, faDigits, faDuration, faHourClock } from "@/lib/format";
 import { ProfileRoute } from "@/routes/profile";
 import { renderAt } from "@/test/render";
 
 const NOW = 1_800_000_000_000;
 
-type Day = { day: string; totalMs: number };
+type Task = { kind: "task" | "private" | "none"; name: string | null; totalMs: number };
+type Day = { day: string; totalMs: number; tasks: Task[] };
 
-/** `days` columns ending on the last of them, all empty unless said otherwise. */
-function chart(days: number, worked: Record<string, number> = {}): Day[] {
+/** One row of a day's detail, the way the server sends one. */
+function task(name: string, totalMs: number): Task {
+  return { kind: "task", name, totalMs };
+}
+
+/** The masked row: every private task at once, with no name to send. */
+function masked(totalMs: number): Task {
+  return { kind: "private", name: null, totalMs };
+}
+
+/**
+ * `days` columns ending on the last of them, all empty unless said otherwise.
+ *
+ * A day is given either a total — which becomes one task's worth of work — or
+ * the rows it is made of, which is what the detail is actually about.
+ */
+function chart(days: number, worked: Record<string, number | Task[]> = {}): Day[] {
   const out: Day[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const at = new Date(Date.UTC(2026, 2, 15) - i * 86_400_000);
     const day = at.toISOString().slice(0, 10);
-    out.push({ day, totalMs: worked[day] ?? 0 });
+    const of = worked[day] ?? 0;
+    const tasks = typeof of === "number" ? (of > 0 ? [task("درس", of)] : []) : of;
+    out.push({ day, totalMs: tasks.reduce((sum, row) => sum + row.totalMs, 0), tasks });
   }
   return out;
 }
@@ -31,12 +49,14 @@ function server({
   handle = "yazdan",
   days = chart(7, { "2026-03-15": 75 * 60_000 }),
   everFocused = true,
+  owner = false,
   status = 200,
   hold = false,
 }: {
   handle?: string;
   days?: Day[];
   everFocused?: boolean;
+  owner?: boolean;
   status?: number;
   hold?: boolean;
 } = {}) {
@@ -50,7 +70,7 @@ function server({
         headers: { "Content-Type": "application/json" },
       });
     }
-    return new Response(JSON.stringify({ handle, days, everFocused, serverNow: NOW }), {
+    return new Response(JSON.stringify({ handle, days, everFocused, owner, serverNow: NOW }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -262,5 +282,203 @@ describe("the focus chart", () => {
     // A chart that ran the other way would put today where the eye looks for
     // the oldest day.
     expect(container.querySelector('[dir="ltr"]')).toBeTruthy();
+  });
+});
+
+describe("the day detail", () => {
+  it("docks below the chart, opened on the most recent day with data", async () => {
+    server({
+      days: chart(7, {
+        "2026-03-13": 75 * 60_000,
+        // Nothing on the 14th or the 15th: the page opens on the last thing
+        // there is to say, not on today.
+      }),
+    });
+    renderProfile();
+
+    // The header: the Jalali date above, the total as a clock, the caption
+    // below it — so the bare number is never left to stand for itself.
+    await screen.findByText(faDate("2026-03-13"));
+    expect(screen.getByText(faHourClock(75 * 60_000))).toBeTruthy();
+    expect(screen.getByText(copy.profile.focusedHours)).toBeTruthy();
+  });
+
+  it("puts a picture beside the total, and keeps it there", async () => {
+    server({ days: chart(7, { "2026-03-15": 75 * 60_000 }) });
+    const { container } = renderProfile();
+
+    await screen.findByText(copy.profile.focusedHours);
+    const image = container.querySelector("img");
+    // Decoration, so it is not announced: the day is already spelled out
+    // beside it in words.
+    expect(image?.getAttribute("alt")).toBe("");
+    expect(image?.getAttribute("src")).toBeTruthy();
+  });
+
+  it("lists the tasks as they were sent, each with its share of the day", async () => {
+    // Largest first is the server's answer — it is the one that knows what a
+    // day was made of — and the panel does not second-guess the order.
+    server({
+      days: chart(7, {
+        "2026-03-15": [task("ریاضی", 75 * 60_000), task("درس", 25 * 60_000)],
+      }),
+    });
+    const { container } = renderProfile();
+
+    await screen.findByText(copy.profile.focusedHours);
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows.map((row) => row.textContent)).toEqual([
+      `ریاضی${faDuration(75 * 60_000)}`,
+      `درس${faDuration(25 * 60_000)}`,
+    ]);
+    // The bars are shares of the day, which is what makes the rows comparable
+    // at a glance — the durations beside them are the exact answer.
+    const bars = rows.map((row) => row.querySelector<HTMLElement>(".bg-chart-1")?.style.width);
+    expect(bars).toEqual(["75%", "25%"]);
+  });
+
+  it("shows a visitor one masked row for all the private tasks", async () => {
+    server({
+      days: chart(7, { "2026-03-15": [masked(50 * 60_000), task("درس", 25 * 60_000)] }),
+    });
+    renderProfile();
+
+    // How long somebody worked is public; what they were doing is theirs. The
+    // names never reached the client for this row to be built from.
+    await screen.findByText(copy.profile.privateBucket);
+    expect(screen.getByText("درس")).toBeTruthy();
+    // And a stranger is not told about the owner's view of it.
+    expect(screen.queryByText(copy.profile.ownerNote)).toBeNull();
+  });
+
+  it("names an untasked row without masking it", async () => {
+    server({
+      days: chart(7, { "2026-03-15": [{ kind: "none", name: null, totalMs: 25 * 60_000 }] }),
+    });
+    renderProfile();
+
+    // Work with no task is not hiding anything, so it does not read as
+    // something withheld.
+    await screen.findByText(copy.profile.noTask);
+    expect(screen.queryByText(copy.profile.privateBucket)).toBeNull();
+  });
+
+  it("says on your own page that others do not see these names", async () => {
+    server({
+      owner: true,
+      days: chart(7, { "2026-03-15": [task("درمان", 50 * 60_000)] }),
+    });
+    renderProfile("yazdan", { status: "authenticated", handle: "yazdan" });
+
+    // Seeing your private tasks named is exactly the moment you might think
+    // strangers can too.
+    await screen.findByText("درمان");
+    expect(screen.getByText(copy.profile.ownerNote)).toBeTruthy();
+  });
+
+  it("renders no panel for a chart with nothing in it", async () => {
+    // Somebody with a history who did nothing this week: a flat line, and no
+    // detail to dock under it — not a panel reading ۰:۰۰.
+    server({ days: chart(7), everFocused: true });
+    const { container } = renderProfile();
+
+    await waitFor(() => expect(container.querySelector("svg")).toBeTruthy());
+    expect(screen.queryByText(copy.profile.focusedHours)).toBeNull();
+  });
+});
+
+describe("pointing at the chart", () => {
+  // A week with two worked days, far enough apart on the axis to point at one
+  // and then the other.
+  const WEEK = () =>
+    chart(7, {
+      "2026-03-10": [task("ریاضی", 30 * 60_000)],
+      "2026-03-15": [task("درس", 75 * 60_000)],
+    });
+
+  /** Point at the chart, `x` pixels across the six hundred it is stubbed at. */
+  async function point(container: HTMLElement, x: number) {
+    // The chart is code-split, and measures itself once it arrives.
+    const chartArea = await waitFor(() => {
+      const drawn = container.querySelector(".recharts-wrapper");
+      if (drawn === null) throw new Error("the chart has not drawn yet");
+      return drawn;
+    });
+    fireEvent.mouseMove(chartArea, { clientX: x, clientY: 50 });
+  }
+
+  it("selects the day under the pointer and docks its detail", async () => {
+    server({ days: WEEK() });
+    const { container } = renderProfile();
+
+    // It opens on the most recent day with data...
+    await screen.findByText(faDate("2026-03-15"));
+
+    // ...and follows the pointer to an earlier one.
+    await point(container, 100);
+    await screen.findByText(faDate("2026-03-10"));
+    expect(screen.getByText(faHourClock(30 * 60_000))).toBeTruthy();
+    expect(screen.getByText("ریاضی")).toBeTruthy();
+  });
+
+  it("marks the selected day on the line", async () => {
+    server({ days: WEEK() });
+    const { container } = renderProfile();
+
+    // The panel always has a visible anchor on the line it came from: a dot on
+    // the day, and a faint crosshair down it.
+    await waitFor(() => expect(container.querySelector(".recharts-reference-dot")).toBeTruthy());
+    expect(container.querySelector(".recharts-reference-line")).toBeTruthy();
+  });
+
+  it("lets the outgoing panel leave before the incoming one arrives", async () => {
+    server({ days: WEEK() });
+    const { container } = renderProfile();
+
+    await screen.findByText(faDate("2026-03-15"));
+    await point(container, 100);
+
+    // The two days differ in height with the length of the task list, so
+    // dissolving them through each other would shunt the page around under
+    // whoever is reading it. While the outgoing panel is fading, it is still
+    // the only one there.
+    await waitFor(() => expect(container.querySelector(".opacity-0")).toBeTruthy());
+    expect(screen.getByText(faDate("2026-03-15"))).toBeTruthy();
+    expect(screen.queryByText(faDate("2026-03-10"))).toBeNull();
+
+    await screen.findByText(faDate("2026-03-10"));
+    expect(screen.queryByText(faDate("2026-03-15"))).toBeNull();
+  });
+
+  it("keeps each day's picture as the pointer goes back and forth", async () => {
+    server({ days: WEEK() });
+    const { container } = renderProfile();
+
+    await screen.findByText(faDate("2026-03-15"));
+    const first = container.querySelector("img")?.getAttribute("src");
+
+    await point(container, 100);
+    await screen.findByText(faDate("2026-03-10"));
+    const second = container.querySelector("img")?.getAttribute("src");
+    // Consecutive days are given different pictures...
+    expect(second).not.toBe(first);
+
+    await point(container, 590);
+    await screen.findByText(faDate("2026-03-15"));
+    // ...and coming back does not reshuffle the art, which would read as a
+    // glitch rather than as a picture.
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(first);
+  });
+
+  it("shows nothing under a day with nothing in it", async () => {
+    server({ days: WEEK() });
+    const { container } = renderProfile();
+
+    await screen.findByText(faDate("2026-03-15"));
+    // The 12th, which nobody worked. The chart is zero-filled so it can be
+    // pointed at; the panel is simply not rendered for it.
+    await point(container, 300);
+
+    await waitFor(() => expect(screen.queryByText(copy.profile.focusedHours)).toBeNull());
   });
 });

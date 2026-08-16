@@ -1,6 +1,8 @@
 package timer
 
 import (
+	"cmp"
+	"slices"
 	"time"
 	// Embedded rather than read from the host, because the host is a container
 	// that may carry no zoneinfo at all. A missing database would not fail —
@@ -47,8 +49,8 @@ func DayStart(at time.Time) time.Time {
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, Tehran).UTC()
 }
 
-// Credited is one pomodoro's contribution to a day: when its bell went, and the
-// nominal length that bell paid for.
+// Credited is one pomodoro's contribution to a day: when its bell went, the
+// nominal length that bell paid for, and what it was worked on.
 //
 // The length is carried rather than derived from the instants, because under
 // fast sessions those are not the same number — the chart is built from what
@@ -56,15 +58,57 @@ func DayStart(at time.Time) time.Time {
 type Credited struct {
 	EndsAt time.Time
 	Length time.Duration
+	Task   Task
 }
 
-// Day is one column of the chart: a Tehran day, and the focus time credited in
-// it.
+// TaskKind separates the three sorts of row a day breaks into.
+type TaskKind string
+
+const (
+	// TaskNamed is a task the reader may be told the name of.
+	TaskNamed TaskKind = "task"
+	// TaskPrivate is a stranger's view of somebody's private tasks — all of
+	// them, as one row. How much was worked is public; what it was is not.
+	TaskPrivate TaskKind = "private"
+	// TaskUntasked is work recorded against no task at all. It is not masking
+	// anything, so it is shown to everybody alike.
+	TaskUntasked TaskKind = "none"
+)
+
+// Task is what a pomodoro was worked on, as far as the person reading is
+// allowed to know.
+//
+// The privacy decision is made *before* a Credited reaches this package: by
+// the time work is bucketed, a private task a stranger may not read is already
+// the TaskPrivate row and carries no name. This type is comparable, and that is
+// what merges rows — two pomodoros on the same task, and every private one, are
+// the same key.
+type Task struct {
+	Kind TaskKind
+	// Name is the task's own name, and is set only when Kind is TaskNamed.
+	// Tasks that share a name share a row: the label is the identity here,
+	// which is how the person whose day it is thinks about their tasks.
+	Name string
+}
+
+// Slice is one task's share of a day.
+type Slice struct {
+	Task  Task
+	Total time.Duration
+}
+
+// Day is one column of the chart: a Tehran day, the focus time credited in it,
+// and what that time was made of.
 type Day struct {
 	// Key is `YYYY-MM-DD`, in Tehran. A day is not a moment, and sending one as
 	// an instant is how a chart ends up with a column in the wrong place.
 	Key   string
 	Total time.Duration
+	// Slices is the day broken down by task, largest first — the order it is
+	// read in, decided here rather than left to a renderer to sort. Empty on a
+	// day with nothing in it, which is a day with no detail to show rather than
+	// one whose detail is zero.
+	Slices []Slice
 }
 
 // Days totals focus time per Tehran day across a closed range, with every day
@@ -79,16 +123,49 @@ type Day struct {
 // so it stays correct if Iran ever restores daylight saving.
 func Days(from, to time.Time, credited []Credited) []Day {
 	totals := make(map[string]time.Duration, len(credited))
+	byTask := make(map[string]map[Task]time.Duration, len(credited))
 	for _, one := range credited {
-		totals[DayKey(one.EndsAt)] += one.Length
+		key := DayKey(one.EndsAt)
+		totals[key] += one.Length
+		tasks, ok := byTask[key]
+		if !ok {
+			tasks = make(map[Task]time.Duration)
+			byTask[key] = tasks
+		}
+		tasks[one.Task] += one.Length
 	}
 
 	days := make([]Day, 0, 1+int(to.Sub(from)/(24*time.Hour)))
 	for at := DayStart(from); !at.After(to); at = DayStart(at.Add(36 * time.Hour)) {
 		key := DayKey(at)
-		days = append(days, Day{Key: key, Total: totals[key]})
+		days = append(days, Day{Key: key, Total: totals[key], Slices: slicesOf(byTask[key])})
 	}
 	return days
+}
+
+// slicesOf orders one day's tasks the way they are read: largest first.
+//
+// Ties are broken by name so the order is a fact about the day rather than
+// about the iteration order of a map — two tasks with the same total would
+// otherwise swap places between two reads of the same unchanged day.
+func slicesOf(tasks map[Task]time.Duration) []Slice {
+	if len(tasks) == 0 {
+		return nil
+	}
+	out := make([]Slice, 0, len(tasks))
+	for task, total := range tasks {
+		out = append(out, Slice{Task: task, Total: total})
+	}
+	slices.SortFunc(out, func(a, b Slice) int {
+		if c := cmp.Compare(b.Total, a.Total); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.Task.Name, b.Task.Name); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Task.Kind, b.Task.Kind)
+	})
+	return out
 }
 
 // DayKey is the Tehran day containing `at`, as `YYYY-MM-DD`.

@@ -371,7 +371,10 @@ honor them:
 These cannot be regenerated and are content, not architecture:
 
 - `app/fonts/PeydaFaNumWeb-*.woff2` — 10 weights.
-- `public/banners/frieren-*.avif` — 26 images.
+- `public/banners/frieren-*.avif` — 26 images. They live at
+  `client/src/assets/banners/` in the rewrite, and not in `client/public/`,
+  because the day detail enumerates the folder at build time — dropping a file
+  in is all it takes to add one, and nothing can enumerate `public/`.
 - `public/main.avif` — the fixed hero.
 - `public/icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,
   `app/icon.svg`, `app/apple-icon.png`, `app/favicon.ico`.

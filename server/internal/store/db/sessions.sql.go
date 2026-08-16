@@ -99,13 +99,16 @@ func (q *Queries) CreditedBetween(ctx context.Context, arg CreditedBetweenParams
 }
 
 const creditedWorkBetween = `-- name: CreditedWorkBetween :many
-SELECT ends_at, duration_ms FROM sessions
-WHERE user_id = $1
-  AND kind = 'work'
-  AND cancelled_at IS NULL
-  AND ends_at >= $2
-  AND ends_at <= $3
-ORDER BY ends_at
+SELECT sessions.ends_at, sessions.duration_ms,
+       categories.name AS category_name, categories.is_public AS category_is_public
+FROM sessions
+LEFT JOIN categories ON categories.id = sessions.category_id
+WHERE sessions.user_id = $1
+  AND sessions.kind = 'work'
+  AND sessions.cancelled_at IS NULL
+  AND sessions.ends_at >= $2
+  AND sessions.ends_at <= $3
+ORDER BY sessions.ends_at
 `
 
 type CreditedWorkBetweenParams struct {
@@ -115,8 +118,10 @@ type CreditedWorkBetweenParams struct {
 }
 
 type CreditedWorkBetweenRow struct {
-	EndsAt     pgtype.Timestamptz
-	DurationMs int64
+	EndsAt           pgtype.Timestamptz
+	DurationMs       int64
+	CategoryName     *string
+	CategoryIsPublic *bool
 }
 
 // The credited pomodoros in a window, for the chart to be built from.
@@ -139,7 +144,12 @@ func (q *Queries) CreditedWorkBetween(ctx context.Context, arg CreditedWorkBetwe
 	var items []CreditedWorkBetweenRow
 	for rows.Next() {
 		var i CreditedWorkBetweenRow
-		if err := rows.Scan(&i.EndsAt, &i.DurationMs); err != nil {
+		if err := rows.Scan(
+			&i.EndsAt,
+			&i.DurationMs,
+			&i.CategoryName,
+			&i.CategoryIsPublic,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

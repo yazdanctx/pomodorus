@@ -1,6 +1,7 @@
 package timer_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -227,5 +228,98 @@ func TestDaysWalksALongRangeExactly(t *testing.T) {
 	if days[0].Key != timer.DayKey(from) || days[89].Key != timer.DayKey(to) {
 		t.Errorf("the range runs %s..%s, want %s..%s",
 			days[0].Key, days[89].Key, timer.DayKey(from), timer.DayKey(to))
+	}
+}
+
+// The day detail: what a day was made of, in the order it is read.
+
+// named is the task a pomodoro was worked on, once somebody has decided the
+// reader may be told its name.
+func named(name string) timer.Task {
+	return timer.Task{Kind: timer.TaskNamed, Name: name}
+}
+
+// slicesOf is a day's breakdown as `name duration` strings, so a case can
+// assert about order and totals in one line.
+func slicesOf(t *testing.T, day timer.Day) []string {
+	t.Helper()
+	out := make([]string, 0, len(day.Slices))
+	for _, slice := range day.Slices {
+		label := slice.Task.Name
+		if slice.Task.Kind != timer.TaskNamed {
+			label = string(slice.Task.Kind)
+		}
+		out = append(out, label+" "+slice.Total.String())
+	}
+	return out
+}
+
+func TestDaysBreakADayDownByTask(t *testing.T) {
+	at := parse(t, "2026-03-15T09:00:00Z")
+
+	days := timer.Days(at, at, []timer.Credited{
+		{EndsAt: at, Length: 25 * time.Minute, Task: named("درس")},
+		{EndsAt: at, Length: 50 * time.Minute, Task: named("ریاضی")},
+		// The same task twice is one row: two pomodoros on one thing is an
+		// hour of that thing, not two half-hours of it.
+		{EndsAt: at, Length: 25 * time.Minute, Task: named("درس")},
+	})
+
+	// Two rows of fifty minutes: the day is broken down by task, and the same
+	// task twice is one row. The tie between them is broken by name, so the
+	// order is a fact about the day rather than about a map's iteration.
+	if got, want := slicesOf(t, days[0]), []string{"درس 50m0s", "ریاضی 50m0s"}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestDaysSortTasksLargestFirst(t *testing.T) {
+	at := parse(t, "2026-03-15T09:00:00Z")
+
+	days := timer.Days(at, at, []timer.Credited{
+		{EndsAt: at, Length: 25 * time.Minute, Task: named("درس")},
+		{EndsAt: at, Length: 75 * time.Minute, Task: named("ریاضی")},
+		{EndsAt: at, Length: 50 * time.Minute, Task: named("کار")},
+	})
+
+	if got, want := slicesOf(t, days[0]), []string{"ریاضی 1h15m0s", "کار 50m0s", "درس 25m0s"}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// The two nameless rows are not the same row. Every private task collapses
+// into one — that is the masking — while work with no task at all is its own
+// row, hiding nothing.
+func TestDaysCollapsePrivateTasksIntoOneRow(t *testing.T) {
+	at := parse(t, "2026-03-15T09:00:00Z")
+	private := timer.Task{Kind: timer.TaskPrivate}
+	untasked := timer.Task{Kind: timer.TaskUntasked}
+
+	days := timer.Days(at, at, []timer.Credited{
+		{EndsAt: at, Length: 25 * time.Minute, Task: private},
+		{EndsAt: at, Length: 25 * time.Minute, Task: private},
+		{EndsAt: at, Length: 20 * time.Minute, Task: untasked},
+	})
+
+	if got, want := slicesOf(t, days[0]), []string{"private 50m0s", "none 20m0s"}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// A day with nothing in it has no detail at all, rather than a detail that
+// says zero — the panel is not rendered for one.
+func TestADayWithNothingInItHasNoSlices(t *testing.T) {
+	from := parse(t, "2026-03-14T09:00:00Z")
+	to := parse(t, "2026-03-15T09:00:00Z")
+
+	days := timer.Days(from, to, []timer.Credited{
+		{EndsAt: to, Length: 25 * time.Minute, Task: named("درس")},
+	})
+
+	if len(days[0].Slices) != 0 {
+		t.Errorf("the empty day has %d slices, want none", len(days[0].Slices))
+	}
+	if len(days[1].Slices) != 1 {
+		t.Errorf("the worked day has %d slices, want 1", len(days[1].Slices))
 	}
 }
