@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down logs dev server client build run test test-server test-client fmt tidy psql mail clean
+.PHONY: help up down logs dev server client build run test test-server test-client profanity fmt tidy psql mail clean
 
 ## help: list targets
 help:
@@ -58,6 +58,12 @@ test-server:
 ## test-client: Vitest
 test-client:
 	cd client && npm test
+
+## profanity: rebuild the wordlist from its public sources (needs a network)
+# Words are added in cmd/build-profanity, never in the generated JSON — a
+# hand-edit is silently undone by the next run, and its own test says so.
+profanity:
+	cd server && go run ./cmd/build-profanity
 
 ## fmt: format Go
 fmt:
