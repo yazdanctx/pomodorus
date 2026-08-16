@@ -235,3 +235,48 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 	// asked to change the timer and wants to know what the timer now is.
 	writeJSON(w, http.StatusOK, sessionResponse{Session: nil, ServerNow: now.UnixMilli()})
 }
+
+// confirmSession acknowledges the bell.
+//
+// It is the one deliberate tap that ends a ring, and the only write a ringing
+// session ever takes. Nothing else about the row moves: the work was credited
+// at its exact nominal end, so a confirmation two hours late records what a
+// confirmation two seconds late records.
+func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentUser(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "not_signed_in")
+		return
+	}
+
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, "session_not_found")
+		return
+	}
+
+	ctx, cancel := timeout(r, 5*time.Second)
+	defer cancel()
+
+	now := s.now()
+	// Refused before the bell: a running session is not something to
+	// acknowledge, and letting it through would be a way to end a pomodoro
+	// early and still be paid for it. As with cancelling, the database decides
+	// the boundary rather than a read-then-write.
+	confirmed, err := s.q.ConfirmSession(ctx, db.ConfirmSessionParams{
+		ID: pgID(id), UserID: user.ID, ConfirmedAt: pgTime(now),
+	})
+	if err != nil {
+		s.log.Error("confirm session", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+	if confirmed == 0 {
+		s.writeError(w, http.StatusConflict, "nothing_ringing")
+		return
+	}
+
+	// Nothing advances on its own: acknowledging leaves the timer idle rather
+	// than starting anything.
+	writeJSON(w, http.StatusOK, sessionResponse{Session: nil, ServerNow: now.UnixMilli()})
+}

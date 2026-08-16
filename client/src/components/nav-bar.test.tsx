@@ -1,9 +1,11 @@
 import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { NavBar } from "@/components/nav-bar";
 import { copy } from "@/lib/copy";
-import { renderAt } from "@/test/render";
+import { faClock, faElapsed } from "@/lib/format";
+import { noteServerTime } from "@/lib/server-clock";
+import { holding, renderAt, SIGNED_IN, workSession } from "@/test/render";
 
 /** The box the CTA and its placeholder must agree on, per the design tokens. */
 const CTA_BOX = ["h-8", "min-w-24"];
@@ -86,5 +88,53 @@ describe("NavBar", () => {
     renderAt(<NavBar />, { path });
 
     expect(screen.queryByRole("banner")).toBeNull();
+  });
+
+  describe("the timer badge", () => {
+    const NOW = 1_800_000_000_000;
+
+    beforeEach(() => noteServerTime(NOW, performance.now()));
+
+    it("offers the plain way in when nothing is live", () => {
+      renderAt(<NavBar />, { auth: SIGNED_IN, session: holding(null) });
+
+      expect(screen.getByText(copy.header.timer)).toBeTruthy();
+    });
+
+    it("reserves the box rather than guessing while the answer is on its way", () => {
+      // A mid-pomodoro reload must not flash «تایمر» and swap to a countdown a
+      // beat later: unknown is not the same as idle.
+      renderAt(<NavBar />, { auth: SIGNED_IN, session: holding(undefined) });
+
+      const placeholder = screen.getByTestId("nav-timer-placeholder");
+      expect(classesOf(placeholder)).toEqual(expect.arrayContaining(CTA_BOX));
+      expect(screen.queryByText(copy.header.timer)).toBeNull();
+    });
+
+    it("swaps the label for the countdown while a session runs", () => {
+      renderAt(<NavBar />, {
+        auth: SIGNED_IN,
+        session: holding(workSession(NOW + 5 * 60_000)),
+      });
+
+      expect(screen.getByText(faClock(5 * 60_000))).toBeTruthy();
+      expect(screen.queryByText(copy.header.timer)).toBeNull();
+    });
+
+    it("inverts to the ring time, and is the only red in the bar", () => {
+      renderAt(<NavBar />, {
+        auth: SIGNED_IN,
+        session: holding(workSession(NOW - 65_000)),
+      });
+
+      // Counting up is the opposite of what this badge otherwise means, so
+      // the inversion has to be legible at a glance, not just in the digits.
+      const badge = screen.getByText(faElapsed(65_000));
+      const link = badge.closest("a");
+      expect(link).not.toBeNull();
+      expect(classesOf(link as Element)).toEqual(
+        expect.arrayContaining(["text-rose-500", "animate-pulse"]),
+      );
+    });
   });
 });

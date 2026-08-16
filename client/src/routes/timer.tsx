@@ -1,3 +1,4 @@
+import { BellRing } from "lucide-react";
 import { useState } from "react";
 
 import { CategoryPicker } from "@/components/category-picker";
@@ -13,10 +14,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 import { copy } from "@/lib/copy";
-import { faClock } from "@/lib/format";
+import { faClock, faElapsed } from "@/lib/format";
 import { usePersisted } from "@/lib/persisted";
 import { useTick } from "@/lib/server-clock";
-import { useLiveSession, type Session } from "@/lib/session";
+import { isRinging, useSession, type Session } from "@/lib/session";
+import { unlockAudio } from "@/lib/sound";
 
 const isNullableString = (value: unknown): value is string | null =>
   value === null || typeof value === "string";
@@ -33,7 +35,11 @@ const isNullableString = (value: unknown): value is string | null =>
  * −/clock/+ row is what sets the horizontal budget on a phone.
  */
 export function TimerRoute() {
-  const { session, start, cancel } = useLiveSession();
+  const { session, start, cancel, confirm } = useSession();
+  // The three screens are one question asked of the clock, not three states
+  // anything stores: before its end a session is running, after its end and
+  // unacknowledged it is ringing.
+  const now = useTick();
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 p-4 sm:p-6">
@@ -43,8 +49,10 @@ export function TimerRoute() {
         <Skeleton className="h-64 w-full" />
       ) : session === null ? (
         <StartScreen onStart={start} />
+      ) : isRinging(session, now) ? (
+        <Ringing session={session} now={now} onConfirm={confirm} />
       ) : (
-        <Running session={session} onCancel={cancel} />
+        <Running session={session} now={now} onCancel={cancel} />
       )}
     </main>
   );
@@ -82,6 +90,13 @@ function StartScreen({
 
   async function begin() {
     if (picked === null) return;
+    // A user gesture is the only moment a browser will unlock audio or show
+    // the permission prompt, and both are for a bell that is still 25 minutes
+    // away. Asked for here or the ring is silent when it arrives.
+    unlockAudio();
+    if ("Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
     setError(null);
     setPending(true);
     try {
@@ -126,12 +141,13 @@ function StartScreen({
 
 function Running({
   session,
+  now,
   onCancel,
 }: {
   session: Session;
+  now: number;
   onCancel: (id: string) => Promise<void>;
 }) {
-  const now = useTick();
   const [error, setError] = useState<string | null>(null);
 
   const remaining = Math.max(0, session.endsAt - now);
@@ -174,6 +190,84 @@ function Running({
 
       <Button variant="outline" onClick={() => void abandon()}>
         {copy.timer.cancelWork}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * A session that has reached its end and is waiting to be acknowledged.
+ *
+ * The work is already credited, at its exact nominal end and its full nominal
+ * length, so nothing on this screen changes the record — which is why there is
+ * deliberately no cancel here. A ringing pomodoro is complete.
+ *
+ * The clock counts *up*, and it is the one hue the app allows itself: a clock
+ * that has stopped meaning "time left" has to be unmistakable from across a
+ * room.
+ */
+function Ringing({
+  session,
+  now,
+  onConfirm,
+}: {
+  session: Session;
+  now: number;
+  onConfirm: (id: string) => Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function acknowledge() {
+    // The tap is a gesture, which is the only thing that can bring audio back
+    // after a reload — and the confirmation may fail, leaving it still ringing.
+    unlockAudio();
+    setError(null);
+    setPending(true);
+    try {
+      await onConfirm(session.id);
+    } catch (failure) {
+      setError(messageFor(failure));
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex w-full flex-col items-center gap-6">
+      <p className="max-w-full truncate text-center text-muted-foreground">
+        {session.categoryName ?? copy.timer.privateTask}
+      </p>
+
+      <div className="flex items-center gap-2">
+        <BellRing className="size-8 animate-pulse" />
+        <p className="text-3xl font-semibold tracking-tight sm:text-4xl">
+          {copy.timer.ringWorkTitle}
+        </p>
+      </div>
+
+      {/* Ring time, not a countdown, and never focus time. */}
+      <p
+        className="font-mono text-6xl font-bold tracking-tight text-rose-500 tabular-nums sm:text-7xl"
+        dir="ltr"
+      >
+        {faElapsed(now - session.endsAt)}
+      </p>
+
+      <Failure message={error} />
+
+      {/* Only a deliberate tap ends a ring. Tab focus, a resume, a mouse
+          moving and a notification being clicked all leave it alone.
+
+          The label is the no-break one: there are no breaks yet, so promising
+          a chill this tap cannot deliver would be a lie. Breaks bring the
+          other label back with the break that earns it. */}
+      <Button
+        className="w-56"
+        variant="outline"
+        disabled={pending}
+        onClick={() => void acknowledge()}
+      >
+        {copy.timer.confirmWorkNoBreak}
       </Button>
     </div>
   );

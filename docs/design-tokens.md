@@ -106,6 +106,20 @@ because `hidden` would make the body a scroll container and break
 The fixed `h-14` matters: the bar keeps its height in the beat before auth
 resolves, so nothing below it ever moves. Hidden on `/login` and `/offline`.
 
+**NavBar timer badge** — the way back to the timer, in three states. Idle it is
+`Timer` + «تایمر». Running it swaps the label for the countdown and the icon
+for `Scan`. Ringing it inverts: `+mm:ss` counting up, `BellRing`, and
+`animate-pulse text-rose-500` on the link. The digits sit in a
+`flex min-w-10 justify-start font-mono tabular-nums` box, and while the live
+session is still unknown the badge holds the CTA box (`h-8 min-w-24`) as a
+skeleton — the same reserved-box rule as the auth CTA, so a mid-pomodoro reload
+does not flash «تایمر» and then swap to a countdown.
+
+v1 also tinted the *running* badge's `Scan` icon `rose-500` (visible in
+`docs/reference/*/10-running-work.png`). That is dropped: the colour rule above
+gives the hue to the ring alone, and a badge that is already red cannot invert
+into one.
+
 **Page padding** — `p-6` is the standard page inset; the timer uses
 `p-4 sm:p-6`.
 

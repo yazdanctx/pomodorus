@@ -3,10 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copy } from "@/lib/copy";
-import { faClock, faDigits } from "@/lib/format";
+import { faClock, faDigits, faElapsed } from "@/lib/format";
 import { noteServerTime } from "@/lib/server-clock";
 import { TimerRoute } from "@/routes/timer";
-import { renderAt } from "@/test/render";
+import { renderAt, SIGNED_IN } from "@/test/render";
+
+/** The timer only exists for somebody signed in, so every test starts there. */
+const renderTimer = () => renderAt(<TimerRoute />, { auth: SIGNED_IN });
 
 const NOW = 1_800_000_000_000;
 const CATEGORY = { id: "c1", name: "درس", isPublic: true };
@@ -41,14 +44,17 @@ function server({
   categories = [CATEGORY],
   onStart,
   onCancel,
+  onConfirm,
 }: {
   session?: Session | null;
   categories?: typeof CATEGORY[];
   onStart?: (body: Record<string, unknown>) => Response;
   onCancel?: () => Response;
+  onConfirm?: () => Response;
 } = {}) {
   const started = vi.fn();
   const cancelled = vi.fn();
+  const confirmed = vi.fn();
 
   const fetched = vi.fn(async (input: string, init?: RequestInit) => {
     const body: Record<string, unknown> =
@@ -70,11 +76,15 @@ function server({
       cancelled();
       return onCancel ? onCancel() : json({ session: null, serverNow: NOW });
     }
+    if (input.endsWith("/confirm")) {
+      confirmed();
+      return onConfirm ? onConfirm() : json({ session: null, serverNow: NOW });
+    }
     throw new Error(`unstubbed request: ${input}`);
   });
 
   vi.stubGlobal("fetch", fetched);
-  return { started, cancelled };
+  return { started, cancelled, confirmed };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -99,7 +109,7 @@ async function pickTask(user: ReturnType<typeof userEvent.setup>) {
 describe("the start screen", () => {
   it("offers the stepper at its default and the picked task", async () => {
     server();
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     expect(await screen.findByText(faDigits(25))).toBeTruthy();
     expect(
@@ -109,7 +119,7 @@ describe("the start screen", () => {
 
   it("cannot start without a task", async () => {
     server({ categories: [] });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     const button = await screen.findByRole("button", { name: copy.timer.start });
     expect(button.getAttribute("disabled")).not.toBeNull();
@@ -121,7 +131,7 @@ describe("the start screen", () => {
     // refuse it.
     localStorage.setItem("pomodorus.category", JSON.stringify("gone"));
     server();
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     const button = await screen.findByRole("button", { name: copy.timer.start });
     expect(button.getAttribute("disabled")).not.toBeNull();
@@ -129,7 +139,7 @@ describe("the start screen", () => {
 
   it("walks the range in five-minute steps", async () => {
     server();
-    renderAt(<TimerRoute />);
+    renderTimer();
     const user = userEvent.setup();
 
     await screen.findByText(faDigits(25));
@@ -142,7 +152,7 @@ describe("the start screen", () => {
 
   it("disables the button for a limit it has reached", async () => {
     server();
-    renderAt(<TimerRoute />);
+    renderTimer();
     const user = userEvent.setup();
     await screen.findByText(faDigits(25));
 
@@ -158,7 +168,7 @@ describe("the start screen", () => {
 
   it("starts with the task and the length that are on screen", async () => {
     const { started } = server();
-    renderAt(<TimerRoute />);
+    renderTimer();
     const user = userEvent.setup();
 
     await pickTask(user);
@@ -175,14 +185,14 @@ describe("the start screen", () => {
 
   it("remembers the task and the length across a reload", async () => {
     server();
-    const first = renderAt(<TimerRoute />);
+    const first = renderTimer();
     const user = userEvent.setup();
 
     await pickTask(user);
     await user.click(screen.getByRole("button", { name: /۳۰/ }));
     first.unmount();
 
-    renderAt(<TimerRoute />);
+    renderTimer();
     expect(await screen.findByText(faDigits(30))).toBeTruthy();
     // The task too: a refresh should not lose your place.
     expect(
@@ -194,7 +204,7 @@ describe("the start screen", () => {
 
   it("says why a start was refused rather than doing nothing", async () => {
     server({ onStart: () => json({ error: "bad_duration", serverNow: NOW }, 400) });
-    renderAt(<TimerRoute />);
+    renderTimer();
     const user = userEvent.setup();
 
     await pickTask(user);
@@ -207,7 +217,7 @@ describe("the start screen", () => {
 describe("a running session", () => {
   it("shows the task, the countdown and a cancel", async () => {
     server({ session: workSession() });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     expect(await screen.findByText("درس")).toBeTruthy();
     expect(screen.getByText(faClock(25 * 60_000))).toBeTruthy();
@@ -229,21 +239,21 @@ describe("a running session", () => {
         endsAt: NOW + 20 * 60_000,
       }),
     });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     expect(await screen.findByText(faClock(20 * 60_000))).toBeTruthy();
   });
 
   it("shows a generic label for a task whose name is not ours to render", async () => {
     server({ session: workSession({ categoryName: null }) });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     expect(await screen.findByText(copy.timer.privateTask)).toBeTruthy();
   });
 
   it("cancels, and returns to the start screen", async () => {
     const { cancelled } = server({ session: workSession() });
-    renderAt(<TimerRoute />);
+    renderTimer();
     const user = userEvent.setup();
 
     await user.click(
@@ -261,7 +271,7 @@ describe("a running session", () => {
       session: workSession(),
       onCancel: () => json({ error: "not_cancellable", serverNow: NOW }, 409),
     });
-    renderAt(<TimerRoute />);
+    renderTimer();
     const user = userEvent.setup();
 
     await user.click(
@@ -275,23 +285,20 @@ describe("a running session", () => {
 describe("the progress bar", () => {
   it("starts at zero for a new session", async () => {
     server({ session: workSession() });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     const bar = await screen.findByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("0");
   });
 
-  it("never renders an invalid width once the end has passed", async () => {
+  it("never renders an invalid width at the very end", async () => {
     // A negative percentage is invalid CSS: the declaration would be dropped,
     // width would fall back to auto, and the bar would flash full white at
     // exactly the moment a session ends.
     server({
-      session: workSession({
-        startedAt: NOW - 60 * 60_000,
-        endsAt: NOW - 35 * 60_000,
-      }),
+      session: workSession({ startedAt: NOW - 25 * 60_000, endsAt: NOW + 1 }),
     });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     const bar = await screen.findByRole("progressbar");
     const width = Number.parseFloat(bar.style.width);
@@ -303,10 +310,89 @@ describe("the progress bar", () => {
     server({
       session: workSession({ startedAt: NOW + 60_000, endsAt: NOW + 26 * 60_000 }),
     });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     const bar = await screen.findByRole("progressbar");
     expect(Number.parseFloat(bar.style.width)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("the bell", () => {
+  /** A session whose nominal end was `ago` milliseconds back: ringing. */
+  const ringing = (ago: number) =>
+    workSession({ startedAt: NOW - 25 * 60_000 - ago, endsAt: NOW - ago });
+
+  it("rings where the countdown was, counting up", async () => {
+    server({ session: ringing(65_000) });
+    renderTimer();
+
+    expect(await screen.findByText(copy.timer.ringWorkTitle)).toBeTruthy();
+    // Up, not down, and prefixed — a clock that has stopped meaning "time
+    // left" has to be unmistakable.
+    expect(screen.getByText(faElapsed(65_000))).toBeTruthy();
+    expect(screen.getByText("درس")).toBeTruthy();
+  });
+
+  it("is the only red in the app", async () => {
+    server({ session: ringing(1000) });
+    renderTimer();
+
+    const clock = await screen.findByText(faElapsed(1000));
+    expect(clock.className.split(/\s+/)).toContain("text-rose-500");
+  });
+
+  it("cannot be cancelled: the work is complete and already credited", async () => {
+    server({ session: ringing(1000) });
+    renderTimer();
+
+    await screen.findByText(copy.timer.ringWorkTitle);
+    expect(
+      screen.queryByRole("button", { name: copy.timer.cancelWork }),
+    ).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("ends on a deliberate tap, and nothing advances on its own", async () => {
+    const { confirmed } = server({ session: ringing(1000) });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.confirmWorkNoBreak }),
+    );
+
+    await waitFor(() => expect(confirmed).toHaveBeenCalled());
+    // Back to the start screen: acknowledging starts nothing.
+    expect(
+      await screen.findByRole("button", { name: copy.timer.start }),
+    ).toBeTruthy();
+  });
+
+  it("keeps ringing when a confirmation is refused, and says why", async () => {
+    server({
+      session: ringing(1000),
+      onConfirm: () => json({ error: "nothing_ringing", serverNow: NOW }, 409),
+    });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.confirmWorkNoBreak }),
+    );
+
+    expect(await screen.findByText(copy.errors.nothingRinging)).toBeTruthy();
+    expect(screen.getByText(copy.timer.ringWorkTitle)).toBeTruthy();
+  });
+
+  it("rings a session that ended while the tab was asleep", async () => {
+    // Nothing was scheduled and nothing was pushed: the state is recomputed
+    // from `endsAt` and the clock, so however long the app was away it opens
+    // into the ring rather than into a finished countdown.
+    server({ session: ringing(3 * 60 * 60_000) });
+    renderTimer();
+
+    expect(await screen.findByText(copy.timer.ringWorkTitle)).toBeTruthy();
+    expect(screen.getByText(faElapsed(3 * 60 * 60_000))).toBeTruthy();
   });
 });
 
@@ -315,7 +401,7 @@ describe("opening on a second device", () => {
     // The server owns the timer, so "a second device" is just another client
     // asking the same question and getting the same answer.
     server({ session: workSession() });
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     expect(await screen.findByText(faClock(25 * 60_000))).toBeTruthy();
     expect(screen.queryByRole("button", { name: copy.timer.start })).toBeNull();
@@ -323,7 +409,7 @@ describe("opening on a second device", () => {
 
   it("reserves the page rather than flashing a start button while it asks", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    renderAt(<TimerRoute />);
+    renderTimer();
 
     expect(screen.queryByRole("button", { name: copy.timer.start })).toBeNull();
     expect(

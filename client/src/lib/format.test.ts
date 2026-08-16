@@ -7,6 +7,7 @@ import {
   faDateShort,
   faDigits,
   faDuration,
+  faElapsed,
   faHourClock,
 } from "./format";
 
@@ -40,6 +41,24 @@ describe("faClock", () => {
 
   it("keeps counting past an hour rather than wrapping", () => {
     expect(faClock(60 * 60_000)).toBe("۶۰:۰۰");
+  });
+});
+
+describe("faElapsed", () => {
+  it("signs the ring time and pads it", () => {
+    expect(faElapsed(65_000)).toBe("+۰۱:۰۵");
+  });
+
+  it("rounds down, so a bell that has just gone reads zero", () => {
+    // The opposite of a countdown: this one is counting away from an instant
+    // rather than towards one.
+    expect(faElapsed(0)).toBe("+۰۰:۰۰");
+    expect(faElapsed(999)).toBe("+۰۰:۰۰");
+  });
+
+  it("never goes negative, and never wraps at an hour", () => {
+    expect(faElapsed(-5_000)).toBe("+۰۰:۰۰");
+    expect(faElapsed(3 * 60 * 60_000)).toBe("+۱۸۰:۰۰");
   });
 });
 

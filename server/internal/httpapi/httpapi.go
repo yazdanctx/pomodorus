@@ -79,6 +79,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/session", s.getSession)
 	s.mux.HandleFunc("POST /api/session/start", s.startSession)
 	s.mux.HandleFunc("POST /api/session/{id}/cancel", s.cancelSession)
+	s.mux.HandleFunc("POST /api/session/{id}/confirm", s.confirmSession)
 
 	if h, ok := web.Handler(); ok {
 		s.mux.Handle("/", h)

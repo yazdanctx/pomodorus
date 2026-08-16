@@ -29,6 +29,16 @@ WHERE id = $1 AND user_id = $2
   AND confirmed_at IS NULL AND cancelled_at IS NULL
   AND ends_at > $3;
 
+-- name: ConfirmSession :execrows
+-- Only once the bell has gone, and only ever this one column. The work was
+-- credited at its exact nominal end, so what this records is the
+-- acknowledgement and nothing else: confirming in two seconds and confirming
+-- in two hours write the same history.
+UPDATE sessions SET confirmed_at = $3
+WHERE id = $1 AND user_id = $2
+  AND confirmed_at IS NULL AND cancelled_at IS NULL
+  AND ends_at <= $3;
+
 -- name: HasLiveSessionForCategory :one
 -- The guard on editing a task out from under a session that is using it.
 SELECT EXISTS (

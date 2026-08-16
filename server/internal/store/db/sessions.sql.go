@@ -34,6 +34,31 @@ func (q *Queries) CancelSession(ctx context.Context, arg CancelSessionParams) (i
 	return result.RowsAffected(), nil
 }
 
+const confirmSession = `-- name: ConfirmSession :execrows
+UPDATE sessions SET confirmed_at = $3
+WHERE id = $1 AND user_id = $2
+  AND confirmed_at IS NULL AND cancelled_at IS NULL
+  AND ends_at <= $3
+`
+
+type ConfirmSessionParams struct {
+	ID          pgtype.UUID
+	UserID      pgtype.UUID
+	ConfirmedAt pgtype.Timestamptz
+}
+
+// Only once the bell has gone, and only ever this one column. The work was
+// credited at its exact nominal end, so what this records is the
+// acknowledgement and nothing else: confirming in two seconds and confirming
+// in two hours write the same history.
+func (q *Queries) ConfirmSession(ctx context.Context, arg ConfirmSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, confirmSession, arg.ID, arg.UserID, arg.ConfirmedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const hasLiveSessionForCategory = `-- name: HasLiveSessionForCategory :one
 SELECT EXISTS (
     SELECT 1 FROM sessions

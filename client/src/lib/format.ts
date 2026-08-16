@@ -30,6 +30,26 @@ export function faClock(ms: number): string {
   );
 }
 
+/**
+ * Ring time as `+mm:ss` in Persian digits, e.g. +۰۱:۰۵.
+ *
+ * It counts up, so it rounds *down*: a bell that has just gone reads +۰۰:۰۰
+ * for its first second, where a countdown shows its full length for that
+ * second. Minutes are not carried into hours — a ring three hours old reading
+ * +۱۸۰:۱۲ is exactly the point.
+ *
+ * The `+` is part of the string rather than markup beside it: it is a sign on
+ * a number, not decoration, and splitting it would let a copied clock lose it.
+ */
+export function faElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return faDigits(
+    `+${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`,
+  );
+}
+
 /** Focus time as a sentence: «۲ ساعت و ۲۵ دقیقه» / «۴۵ دقیقه». */
 export function faDuration(ms: number): string {
   const totalMinutes = Math.round(ms / 60_000);

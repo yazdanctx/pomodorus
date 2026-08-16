@@ -116,6 +116,8 @@ export function messageFor(error: unknown): string {
       return copy.errors.badDuration;
     case "not_cancellable":
       return copy.errors.notCancellable;
+    case "nothing_ringing":
+      return copy.errors.nothingRinging;
     case "session_not_found":
       return copy.errors.sessionNotFound;
     case OFFLINE:
