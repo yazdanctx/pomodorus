@@ -44,6 +44,15 @@ func (f *Fixed) Now() time.Time {
 	return f.now
 }
 
+// Set puts the clock at an instant. Advance is the usual way to move it; this
+// is for a test that has run time forward to check one thing and needs to be
+// back before the boundary to check the next.
+func (f *Fixed) Set(at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.now = at.UTC()
+}
+
 // Advance moves the clock forward. This is how expiry, the bell and the break
 // are tested: the assertion is about what the server says at a later instant,
 // not about whether a timer fired.

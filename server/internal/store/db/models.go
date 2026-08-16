@@ -5,10 +5,55 @@
 package db
 
 import (
+	"database/sql/driver"
+	"fmt"
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type SessionKind string
+
+const (
+	SessionKindWork       SessionKind = "work"
+	SessionKindShortBreak SessionKind = "short_break"
+	SessionKindLongBreak  SessionKind = "long_break"
+)
+
+func (e *SessionKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SessionKind(s)
+	case string:
+		*e = SessionKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SessionKind: %T", src)
+	}
+	return nil
+}
+
+type NullSessionKind struct {
+	SessionKind SessionKind
+	Valid       bool // Valid is true if SessionKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSessionKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.SessionKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SessionKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSessionKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SessionKind), nil
+}
 
 type AuthSession struct {
 	TokenHash  []byte
@@ -37,6 +82,18 @@ type LoginCode struct {
 	ExpiresAt   pgtype.Timestamptz
 	Attempts    int32
 	ConsumedAt  pgtype.Timestamptz
+}
+
+type Session struct {
+	ID          pgtype.UUID
+	UserID      pgtype.UUID
+	Kind        SessionKind
+	CategoryID  pgtype.UUID
+	StartedAt   pgtype.Timestamptz
+	DurationMs  int64
+	EndsAt      pgtype.Timestamptz
+	ConfirmedAt pgtype.Timestamptz
+	CancelledAt pgtype.Timestamptz
 }
 
 type User struct {

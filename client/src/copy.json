@@ -154,6 +154,8 @@
     "categoryNameLength": "اسم تسک باید بین ۱ تا ۴۰ حرف باشه",
     "categoryNameProfane": "این اسم نه، یه چیز دیگه بذار روش",
     "categoryBusy": "وسط سشن نمیشه تسک رو دستکاری کرد",
-    "fastNotAllowed": "حالت تست فقط تو دِو کار می‌کنه"
+    "fastNotAllowed": "حالت تست فقط تو دِو کار می‌کنه",
+    "notCancellable": "دیگه نمیشه کنسلش کرد، زنگش خورده",
+    "sessionNotFound": "این سشن رو پیدا نکردیم :/"
   }
 }

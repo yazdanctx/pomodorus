@@ -11,6 +11,7 @@
  */
 
 import { copy } from "@/lib/copy";
+import { noteServerTime } from "@/lib/server-clock";
 
 /** Every response carries the server's clock, so the client can correct skew. */
 export type ServerTimed = { serverNow: number };
@@ -41,6 +42,10 @@ async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  // Read before the request leaves, so the round trip can be measured and the
+  // server's clock corrected for it.
+  const sentAt = performance.now();
+
   let response: Response;
   try {
     response = await fetch(path, {
@@ -56,6 +61,14 @@ async function request<T>(
   if (response.status === 204) return undefined as T;
 
   const payload: unknown = await response.json().catch(() => null);
+
+  // Every response carries the server's clock, including the failures — a
+  // rate-limited request is still a fresh reading of what time it is.
+  if (payload && typeof payload === "object" && "serverNow" in payload) {
+    const serverNow = Number(payload.serverNow);
+    if (Number.isFinite(serverNow)) noteServerTime(serverNow, sentAt);
+  }
+
   if (!response.ok) {
     const code =
       payload && typeof payload === "object" && "error" in payload
@@ -99,6 +112,12 @@ export function messageFor(error: unknown): string {
       return copy.errors.categoryBusy;
     case "category_not_found":
       return copy.errors.categoryNotFound;
+    case "bad_duration":
+      return copy.errors.badDuration;
+    case "not_cancellable":
+      return copy.errors.notCancellable;
+    case "session_not_found":
+      return copy.errors.sessionNotFound;
     case OFFLINE:
       return copy.offline.needInternet;
     default:

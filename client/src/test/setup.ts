@@ -20,3 +20,8 @@ Element.prototype.scrollIntoView ??= () => {};
 // never registers itself. Unmounting between tests is what stops one test's
 // document from being queryable in the next.
 afterEach(cleanup);
+
+// Persisted preferences are per-device, and in a test run the device is shared
+// by every test in the file. One test's remembered length must not become the
+// next one's starting point.
+afterEach(() => localStorage.clear());

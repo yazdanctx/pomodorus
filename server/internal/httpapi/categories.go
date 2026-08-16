@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -167,6 +168,15 @@ func (s *Server) updateCategory(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := timeout(r, 5*time.Second)
 	defer cancel()
 
+	if busy, err := s.categoryIsBusy(ctx, user.ID, id); err != nil {
+		s.log.Error("check category is busy", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	} else if busy {
+		s.writeError(w, http.StatusConflict, "category_busy")
+		return
+	}
+
 	now := s.now()
 	row, err := s.q.UpdateCategory(ctx, db.UpdateCategoryParams{
 		ID:        pgID(id),
@@ -204,6 +214,15 @@ func (s *Server) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := timeout(r, 5*time.Second)
 	defer cancel()
 
+	if busy, err := s.categoryIsBusy(ctx, user.ID, id); err != nil {
+		s.log.Error("check category is busy", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	} else if busy {
+		s.writeError(w, http.StatusConflict, "category_busy")
+		return
+	}
+
 	// A tombstone rather than a delete: the row keeps its name and every
 	// session recorded against it keeps pointing at it, so a tidy-up never
 	// costs somebody their history.
@@ -235,6 +254,17 @@ func checkCategoryName(raw string, isPublic bool) (name, failure string) {
 		return "", "category_name_profane"
 	}
 	return name, ""
+}
+
+// categoryIsBusy reports whether a session is running or ringing on this
+// category. A live session cannot be allowed to lose its label or have it
+// changed underneath it — what it is recorded against has to be what was
+// chosen when it began.
+func (s *Server) categoryIsBusy(ctx context.Context, userID pgtype.UUID, id uuid.UUID) (bool, error) {
+	return s.q.HasLiveSessionForCategory(ctx, db.HasLiveSessionForCategoryParams{
+		UserID:     userID,
+		CategoryID: pgID(id),
+	})
 }
 
 func pgID(id uuid.UUID) pgtype.UUID {
