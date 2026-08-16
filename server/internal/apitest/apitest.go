@@ -45,6 +45,11 @@ import (
 // into the boundary rather than stumble onto it.
 var Origin = time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC)
 
+// OriginDay is the Tehran day the origin falls in, as the wire spells one.
+// Written out rather than computed from the code under test, so a test that
+// asserts about a day is not agreeing with whatever the bucketing happens to do.
+const OriginDay = "2026-03-15"
+
 type Harness struct {
 	t      *testing.T
 	server *httptest.Server

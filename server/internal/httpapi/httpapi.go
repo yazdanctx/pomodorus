@@ -107,6 +107,11 @@ func (s *Server) routes() {
 	// signed in.
 	s.mux.HandleFunc("GET /api/feed", s.getFeed)
 
+	// A public, read-only page at a name somebody can send. No auth, for the
+	// same reason the feed has none: a link that only works for its owner is
+	// not a link.
+	s.mux.HandleFunc("GET /api/profile/{handle}", s.getProfile)
+
 	s.mux.HandleFunc("GET /api/session", s.getSession)
 	s.mux.HandleFunc("POST /api/session/start", s.startSession)
 	s.mux.HandleFunc("POST /api/session/{id}/cancel", s.cancelSession)

@@ -21,3 +21,12 @@ RETURNING *;
 UPDATE users SET handle = $2, handle_set_at = $3
 WHERE id = $1 AND handle IS NULL
 RETURNING *;
+
+-- name: UserByHandle :one
+-- The public lookup, and the only one that finds somebody by the name they
+-- chose rather than by their credential.
+--
+-- `handle` is citext, so this folds case the way the person typing the URL
+-- expects: /u/Yazdan and /u/yazdan are the same profile, and neither is a
+-- second account waiting to be claimed.
+SELECT * FROM users WHERE handle = $1;

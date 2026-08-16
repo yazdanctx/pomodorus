@@ -47,6 +47,50 @@ func DayStart(at time.Time) time.Time {
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, Tehran).UTC()
 }
 
+// Credited is one pomodoro's contribution to a day: when its bell went, and the
+// nominal length that bell paid for.
+//
+// The length is carried rather than derived from the instants, because under
+// fast sessions those are not the same number — the chart is built from what
+// was credited, not from how long the row happened to be open.
+type Credited struct {
+	EndsAt time.Time
+	Length time.Duration
+}
+
+// Day is one column of the chart: a Tehran day, and the focus time credited in
+// it.
+type Day struct {
+	// Key is `YYYY-MM-DD`, in Tehran. A day is not a moment, and sending one as
+	// an instant is how a chart ends up with a column in the wrong place.
+	Key   string
+	Total time.Duration
+}
+
+// Days totals focus time per Tehran day across a closed range, with every day
+// in it present.
+//
+// Zero-filling is the point rather than a convenience. A line drawn only
+// through the days somebody worked has no gaps in it, so a fortnight off reads
+// as a flat stretch of effort instead of the absence it was — the shape of the
+// chart would be a lie told by omission.
+//
+// The range is walked by day boundary rather than by adding twenty-four hours,
+// so it stays correct if Iran ever restores daylight saving.
+func Days(from, to time.Time, credited []Credited) []Day {
+	totals := make(map[string]time.Duration, len(credited))
+	for _, one := range credited {
+		totals[DayKey(one.EndsAt)] += one.Length
+	}
+
+	days := make([]Day, 0, 1+int(to.Sub(from)/(24*time.Hour)))
+	for at := DayStart(from); !at.After(to); at = DayStart(at.Add(36 * time.Hour)) {
+		key := DayKey(at)
+		days = append(days, Day{Key: key, Total: totals[key]})
+	}
+	return days
+}
+
 // DayKey is the Tehran day containing `at`, as `YYYY-MM-DD`.
 //
 // This is how a day is named on the wire and in a chart's axis: a bare key,

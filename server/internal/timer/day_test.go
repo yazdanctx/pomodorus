@@ -122,3 +122,110 @@ func parse(t *testing.T, value string) time.Time {
 	}
 	return at.UTC()
 }
+
+// The chart's shape is the whole reason zero-filling matters, so these are
+// mostly about the days nobody worked.
+func TestDaysCoversEveryDayInTheRange(t *testing.T) {
+	from := parse(t, "2026-03-10T09:00:00Z")
+	to := parse(t, "2026-03-15T09:00:00Z")
+
+	days := timer.Days(from, to, nil)
+
+	// Six days inclusive, in order, none missing.
+	want := []string{"2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13", "2026-03-14", "2026-03-15"}
+	if len(days) != len(want) {
+		t.Fatalf("got %d days, want %d: %+v", len(days), len(want), days)
+	}
+	for i, key := range want {
+		if days[i].Key != key {
+			t.Errorf("day %d is %s, want %s", i, days[i].Key, key)
+		}
+		// A day nobody worked is zero, not absent: a line drawn only through
+		// the days somebody worked would read a fortnight off as flat effort.
+		if days[i].Total != 0 {
+			t.Errorf("day %s totals %s, want nothing", key, days[i].Total)
+		}
+	}
+}
+
+func TestDaysTotalsWhatWasCreditedInEach(t *testing.T) {
+	from := parse(t, "2026-03-13T09:00:00Z")
+	to := parse(t, "2026-03-15T09:00:00Z")
+
+	days := timer.Days(from, to, []timer.Credited{
+		{EndsAt: parse(t, "2026-03-13T10:00:00Z"), Length: 25 * time.Minute},
+		{EndsAt: parse(t, "2026-03-13T11:00:00Z"), Length: 30 * time.Minute},
+		// Nothing on the 14th.
+		{EndsAt: parse(t, "2026-03-15T08:00:00Z"), Length: 25 * time.Minute},
+	})
+
+	got := map[string]time.Duration{}
+	for _, day := range days {
+		got[day.Key] = day.Total
+	}
+	for key, want := range map[string]time.Duration{
+		"2026-03-13": 55 * time.Minute,
+		"2026-03-14": 0,
+		"2026-03-15": 25 * time.Minute,
+	} {
+		if got[key] != want {
+			t.Errorf("%s totals %s, want %s", key, got[key], want)
+		}
+	}
+}
+
+// The boundary again, from the chart's side: a bell twenty minutes either side
+// of Tehran midnight lands in different columns, and neither is where UTC
+// would have put it.
+func TestDaysBucketByTehranMidnight(t *testing.T) {
+	from := parse(t, "2026-03-14T09:00:00Z")
+	to := parse(t, "2026-03-16T09:00:00Z")
+
+	days := timer.Days(from, to, []timer.Credited{
+		// 20:20 UTC is 23:50 in Tehran on the 14th — the last of that day.
+		{EndsAt: parse(t, "2026-03-14T20:20:00Z"), Length: 25 * time.Minute},
+		// 20:40 UTC is 00:10 in Tehran, which is the 15th.
+		{EndsAt: parse(t, "2026-03-14T20:40:00Z"), Length: 30 * time.Minute},
+	})
+
+	got := map[string]time.Duration{}
+	for _, day := range days {
+		got[day.Key] = day.Total
+	}
+	if got["2026-03-14"] != 25*time.Minute {
+		t.Errorf("the 14th totals %s, want 25m", got["2026-03-14"])
+	}
+	if got["2026-03-15"] != 30*time.Minute {
+		t.Errorf("the 15th totals %s, want 30m", got["2026-03-15"])
+	}
+}
+
+// A single day is a range like any other, and the commonest one on the chart's
+// shortest preset.
+func TestDaysHandlesASingleDay(t *testing.T) {
+	at := parse(t, "2026-03-15T09:00:00Z")
+	days := timer.Days(at, at, []timer.Credited{{EndsAt: at, Length: 25 * time.Minute}})
+
+	if len(days) != 1 {
+		t.Fatalf("got %d days, want 1: %+v", len(days), days)
+	}
+	if days[0].Key != "2026-03-15" || days[0].Total != 25*time.Minute {
+		t.Errorf("got %+v, want 2026-03-15 at 25m", days[0])
+	}
+}
+
+// Ninety days is the longest preset, and the one where an off-by-one in the
+// walk would show up as a missing column.
+func TestDaysWalksALongRangeExactly(t *testing.T) {
+	to := parse(t, "2026-06-15T09:00:00Z")
+	from := to.Add(-89 * 24 * time.Hour)
+
+	days := timer.Days(from, to, nil)
+	if len(days) != 90 {
+		t.Fatalf("got %d days over the ninety-day preset, want 90", len(days))
+	}
+	if days[0].Key != timer.DayKey(from) || days[89].Key != timer.DayKey(to) {
+		t.Errorf("the range runs %s..%s, want %s..%s",
+			days[0].Key, days[89].Key, timer.DayKey(from), timer.DayKey(to))
+	}
+}

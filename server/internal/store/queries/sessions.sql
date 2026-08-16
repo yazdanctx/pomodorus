@@ -117,3 +117,23 @@ WHERE sessions.confirmed_at IS NULL
   AND sessions.ends_at > @now
   AND users.handle IS NOT NULL
 ORDER BY sessions.started_at DESC;
+
+-- name: CreditedWorkBetween :many
+-- The credited pomodoros in a window, for the chart to be built from.
+--
+-- Rows rather than a GROUP BY, because the grouping is by *Tehran* day and that
+-- boundary lives in the domain package — a second definition of it in SQL would
+-- be a second thing to get wrong, and this one would depend on the database's
+-- own timezone data rather than the tzdata the binary embeds. The volume is a
+-- few hundred rows over ninety days of heavy use, which is nothing to carry.
+--
+-- Bounded by `ends_at`, like every other read of credited work: it is when the
+-- bell went, and a pomodoro that began before Tehran midnight and rang after it
+-- belongs to the day it was credited in.
+SELECT ends_at, duration_ms FROM sessions
+WHERE user_id = sqlc.arg(user_id)
+  AND kind = 'work'
+  AND cancelled_at IS NULL
+  AND ends_at >= sqlc.arg(from_time)
+  AND ends_at <= sqlc.arg(to_time)
+ORDER BY ends_at;

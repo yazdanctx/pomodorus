@@ -94,3 +94,29 @@ func (q *Queries) SetIntervals(ctx context.Context, arg SetIntervalsParams) (Use
 	)
 	return i, err
 }
+
+const userByHandle = `-- name: UserByHandle :one
+SELECT id, email, handle, created_at, handle_set_at, short_break_ms, long_break_ms, per_cycle FROM users WHERE handle = $1
+`
+
+// The public lookup, and the only one that finds somebody by the name they
+// chose rather than by their credential.
+//
+// `handle` is citext, so this folds case the way the person typing the URL
+// expects: /u/Yazdan and /u/yazdan are the same profile, and neither is a
+// second account waiting to be claimed.
+func (q *Queries) UserByHandle(ctx context.Context, handle *string) (User, error) {
+	row := q.db.QueryRow(ctx, userByHandle, handle)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Handle,
+		&i.CreatedAt,
+		&i.HandleSetAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
+		&i.PerCycle,
+	)
+	return i, err
+}
