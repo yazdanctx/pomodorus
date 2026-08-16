@@ -91,6 +91,14 @@ export function messageFor(error: unknown): string {
       return copy.errors.usernameTaken;
     case "handle_profane":
       return copy.errors.usernameProfane;
+    case "category_name_length":
+      return copy.errors.categoryNameLength;
+    case "category_name_profane":
+      return copy.errors.categoryNameProfane;
+    case "category_busy":
+      return copy.errors.categoryBusy;
+    case "category_not_found":
+      return copy.errors.categoryNotFound;
     case OFFLINE:
       return copy.offline.needInternet;
     default:

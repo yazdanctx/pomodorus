@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/yazdanctx/pomodorus/server/internal/identity"
 	"github.com/yazdanctx/pomodorus/server/internal/store/db"
@@ -59,7 +58,7 @@ func (s *Server) claimHandle(w http.ResponseWriter, r *http.Request) {
 	claimed, err := s.q.ClaimHandle(ctx, db.ClaimHandleParams{
 		ID:          user.ID,
 		Handle:      &handle,
-		HandleSetAt: pgtype.Timestamptz{Time: now, Valid: true},
+		HandleSetAt: pgTime(now),
 	})
 	switch {
 	case err == nil:

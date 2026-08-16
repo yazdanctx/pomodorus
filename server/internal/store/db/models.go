@@ -18,6 +18,16 @@ type AuthSession struct {
 	LastSeenAt pgtype.Timestamptz
 }
 
+type Category struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Name      string
+	IsPublic  bool
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+	DeletedAt pgtype.Timestamptz
+}
+
 type LoginCode struct {
 	ID          pgtype.UUID
 	Email       string

@@ -71,6 +71,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/me", s.me)
 	s.mux.HandleFunc("POST /api/handle", s.claimHandle)
 
+	s.mux.HandleFunc("GET /api/categories", s.listCategories)
+	s.mux.HandleFunc("POST /api/categories", s.createCategory)
+	s.mux.HandleFunc("POST /api/categories/{id}", s.updateCategory)
+	s.mux.HandleFunc("POST /api/categories/{id}/delete", s.deleteCategory)
+
 	if h, ok := web.Handler(); ok {
 		s.mux.Handle("/", h)
 	} else {
