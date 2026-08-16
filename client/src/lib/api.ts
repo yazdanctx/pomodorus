@@ -112,7 +112,10 @@ export function messageFor(error: unknown): string {
       return copy.errors.categoryBusy;
     case "category_not_found":
       return copy.errors.categoryNotFound;
+    // The same sentence for the same problem, from the two places a number can
+    // arrive out of its band: the start screen's stepper and the dialog's.
     case "bad_duration":
+    case "bad_interval":
       return copy.errors.badDuration;
     case "not_cancellable":
       return copy.errors.notCancellable;

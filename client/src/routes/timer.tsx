@@ -5,6 +5,7 @@ import { CategoryPicker } from "@/components/category-picker";
 import { Failure } from "@/components/failure";
 import { CycleDots } from "@/components/timer/cycle-dots";
 import { ProgressBar } from "@/components/timer/progress-bar";
+import { SettingsDialog } from "@/components/timer/settings-dialog";
 import {
   DEFAULT_MINUTES,
   isWorkMinutes,
@@ -16,6 +17,7 @@ import { messageFor } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
 import { copy } from "@/lib/copy";
 import { faClock, faElapsed } from "@/lib/format";
+import type { Intervals } from "@/lib/intervals";
 import { usePersisted } from "@/lib/persisted";
 import { useTick } from "@/lib/server-clock";
 import {
@@ -73,7 +75,7 @@ function sessionLabel(session: Session): string {
  * −/clock/+ row is what sets the horizontal budget on a phone.
  */
 export function TimerRoute() {
-  const { session, cycle, start, cancel, confirm } = useSession();
+  const { session, cycle, intervals, start, cancel, confirm, save } = useSession();
   // The screens are one question asked of the clock, not states anything
   // stores: before its end a session is running, after its end and
   // unacknowledged it is ringing.
@@ -138,6 +140,8 @@ export function TimerRoute() {
           actions={{ create, update, remove }}
           minutes={minutes}
           onMinutes={setMinutes}
+          intervals={intervals}
+          onIntervals={save}
           notice={handover}
           onStart={() => beginWork(picked, minutes * 60_000)}
         />
@@ -145,6 +149,7 @@ export function TimerRoute() {
         <Ringing
           session={session}
           cycle={cycle}
+          perCycle={intervals.perCycle}
           now={now}
           canContinue={resume(session).categoryId !== null}
           onConfirm={confirm}
@@ -158,7 +163,13 @@ export function TimerRoute() {
           }}
         />
       ) : (
-        <Running session={session} cycle={cycle} now={now} onEnd={cancel} />
+        <Running
+          session={session}
+          cycle={cycle}
+          perCycle={intervals.perCycle}
+          now={now}
+          onEnd={cancel}
+        />
       )}
     </main>
   );
@@ -171,6 +182,8 @@ function StartScreen({
   actions,
   minutes,
   onMinutes,
+  intervals,
+  onIntervals,
   notice,
   onStart,
 }: {
@@ -180,6 +193,9 @@ function StartScreen({
   actions: Pick<ReturnType<typeof useCategories>, "create" | "update" | "remove">;
   minutes: number;
   onMinutes: (minutes: number) => void;
+  /** The account's breaks and cycle, edited in the dialog below the button. */
+  intervals: Intervals;
+  onIntervals: (next: Intervals) => Promise<void>;
   /** Why the last "another one" never became a pomodoro, if it didn't. */
   notice: string | null;
   onStart: () => Promise<void>;
@@ -225,6 +241,10 @@ function StartScreen({
         >
           {copy.timer.start}
         </Button>
+
+        {/* The other three intervals, one step quieter than the button above
+            them: they are a policy you set once, not a per-session choice. */}
+        <SettingsDialog intervals={intervals} onSave={onIntervals} />
       </div>
     </div>
   );
@@ -242,11 +262,14 @@ function StartScreen({
 function Running({
   session,
   cycle,
+  perCycle,
   now,
   onEnd,
 }: {
   session: Session;
   cycle: Cycle;
+  /** How long a cycle is, which is the account's setting rather than the cycle's. */
+  perCycle: number;
   now: number;
   onEnd: (id: string) => Promise<void>;
 }) {
@@ -289,7 +312,7 @@ function Running({
         now={now}
       />
 
-      <CycleDots {...cycle} />
+      <CycleDots count={cycle.count} perCycle={perCycle} />
 
       <Failure message={error} />
 
@@ -334,6 +357,7 @@ function Running({
 function Ringing({
   session,
   cycle,
+  perCycle,
   now,
   canContinue,
   onConfirm,
@@ -341,6 +365,8 @@ function Ringing({
 }: {
   session: Session;
   cycle: Cycle;
+  /** How long a cycle is, which is the account's setting rather than the cycle's. */
+  perCycle: number;
   now: number;
   canContinue: boolean;
   onConfirm: (id: string) => Promise<Session | null>;
@@ -389,7 +415,7 @@ function Ringing({
         {faElapsed(now - session.endsAt)}
       </p>
 
-      <CycleDots {...cycle} />
+      <CycleDots count={cycle.count} perCycle={perCycle} />
 
       <Failure message={error} />
 

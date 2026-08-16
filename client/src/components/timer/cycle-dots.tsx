@@ -1,6 +1,5 @@
 import { copy, t } from "@/lib/copy";
 import { faDigits } from "@/lib/format";
-import type { Cycle } from "@/lib/session";
 
 /**
  * How far into the cycle you are, as one dot per pomodoro.
@@ -12,8 +11,11 @@ import type { Cycle } from "@/lib/session";
  *
  * The whole of it is a title rather than visible text — the dots are ambient,
  * and the screen already has one number set large on it.
+ *
+ * How many dots there are is the account's setting rather than anything the
+ * cycle carries, so shortening a cycle is visible on the very next render.
  */
-export function CycleDots({ count, perCycle }: Cycle) {
+export function CycleDots({ count, perCycle }: { count: number; perCycle: number }) {
   return (
     <div
       className="flex gap-2"

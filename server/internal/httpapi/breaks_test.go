@@ -212,8 +212,8 @@ func TestTheCycleCountsPomodorosAndPlacesTheLongBreak(t *testing.T) {
 	h := apitest.New(t)
 	client, category := working(t, h)
 
-	if got := liveSession(t, client); got.Cycle.Count != 0 || got.Cycle.PerCycle != 4 {
-		t.Fatalf("a fresh account is at %d of %d, want 0 of 4", got.Cycle.Count, got.Cycle.PerCycle)
+	if got := liveSession(t, client); got.Cycle.Count != 0 || got.Intervals.PerCycle != 4 {
+		t.Fatalf("a fresh account is at %d of %d, want 0 of 4", got.Cycle.Count, got.Intervals.PerCycle)
 	}
 
 	// Three turns of work and rest, each earning the short break.

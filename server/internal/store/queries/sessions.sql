@@ -16,8 +16,12 @@ SELECT * FROM sessions WHERE id = $1 AND user_id = $2;
 -- Idempotent on the client-minted id. The partial unique index is what stops a
 -- second live session existing; this returns the row rather than erroring when
 -- the same start is retried.
-INSERT INTO sessions (id, user_id, kind, category_id, started_at, duration_ms, ends_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+--
+-- The two break lengths are the account's, as they stood at this instant. They
+-- are written once with the row and never touched again, which is what makes
+-- editing the dialog mid-session unable to change the rest this session owes.
+INSERT INTO sessions (id, user_id, kind, category_id, started_at, duration_ms, ends_at, short_break_ms, long_break_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (id) DO UPDATE SET id = sessions.id
 RETURNING *;
 

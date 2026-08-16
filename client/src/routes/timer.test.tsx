@@ -27,7 +27,15 @@ type Session = {
   resumeDurationMs: number | null;
 };
 
-type Cycle = { count: number; perCycle: number };
+type Cycle = { count: number };
+/** What a break is worth on this account, and how long a cycle is. */
+type Intervals = { shortBreakMs: number; longBreakMs: number; perCycle: number };
+
+const CLASSIC: Intervals = {
+  shortBreakMs: 5 * 60_000,
+  longBreakMs: 20 * 60_000,
+  perCycle: 4,
+};
 
 const SHORT_BREAK = 5 * 60_000;
 
@@ -76,22 +84,29 @@ const breakSession = (over: Partial<Session> = {}): Session => ({
  */
 function server({
   session = null as Session | null,
-  cycle = { count: 0, perCycle: 4 } as Cycle,
+  cycle = { count: 0 } as Cycle,
+  intervals = CLASSIC,
   categories = [CATEGORY],
   onStart,
   onCancel,
   onConfirm,
+  onIntervals,
 }: {
   session?: Session | null;
   cycle?: Cycle;
+  intervals?: Intervals;
   categories?: typeof CATEGORY[];
   onStart?: (body: Record<string, unknown>) => Response;
   onCancel?: () => Response;
   onConfirm?: () => Response;
+  // A promise rather than a plain Response where a test wants to hold the
+  // request open and see the row while it is in flight.
+  onIntervals?: (body: Record<string, unknown>) => Response | Promise<Response>;
 } = {}) {
   const started = vi.fn();
   const cancelled = vi.fn();
   const confirmed = vi.fn();
+  const saved = vi.fn();
 
   const fetched = vi.fn(async (input: string, init?: RequestInit) => {
     const body: Record<string, unknown> =
@@ -117,16 +132,24 @@ function server({
       confirmed();
       return onConfirm ? onConfirm() : timer({ session: null });
     }
+    // The intervals are edited with an ordinary POST and answered with the
+    // whole timer state, exactly like every other mutation.
+    if (input === "/api/intervals") {
+      saved(body);
+      return onIntervals
+        ? onIntervals(body)
+        : json({ session, cycle, intervals: body, serverNow: NOW });
+    }
     throw new Error(`unstubbed request: ${input}`);
   });
 
-  // Every answer about the timer carries the session and the cycle together,
-  // exactly as the server sends them.
+  // Every answer about the timer carries the session, the cycle and the
+  // account's intervals together, exactly as the server sends them.
   const timer = ({ session }: { session: Session | null }) =>
-    json({ session, cycle, serverNow: NOW });
+    json({ session, cycle, intervals, serverNow: NOW });
 
   vi.stubGlobal("fetch", fetched);
-  return { started, cancelled, confirmed };
+  return { started, cancelled, confirmed, saved };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -136,8 +159,11 @@ const json = (body: unknown, status = 200) =>
   });
 
 /** A whole timer payload, for the handlers a test overrides itself. */
-const timerJson = (session: Session | null, cycle: Cycle = { count: 0, perCycle: 4 }) =>
-  json({ session, cycle, serverNow: NOW });
+const timerJson = (
+  session: Session | null,
+  cycle: Cycle = { count: 0 },
+  intervals: Intervals = CLASSIC,
+) => json({ session, cycle, intervals, serverNow: NOW });
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -666,7 +692,7 @@ describe("a ringing break", () => {
 
 describe("the cycle dots", () => {
   it("show how far into the cycle a running session is", async () => {
-    server({ session: workSession(), cycle: { count: 2, perCycle: 4 } });
+    server({ session: workSession(), cycle: { count: 2 } });
     renderTimer();
 
     const dots = await screen.findByTitle(
@@ -680,7 +706,7 @@ describe("the cycle dots", () => {
   });
 
   it("clamp rather than grow for somebody who keeps declining the long break", async () => {
-    server({ session: workSession(), cycle: { count: 6, perCycle: 4 } });
+    server({ session: workSession(), cycle: { count: 6 } });
     renderTimer();
 
     const dots = await screen.findByTitle(
@@ -690,7 +716,7 @@ describe("the cycle dots", () => {
   });
 
   it("are not on the start screen, where there is no session to be in one", async () => {
-    server({ cycle: { count: 2, perCycle: 4 } });
+    server({ cycle: { count: 2 } });
     renderTimer();
 
     await screen.findByRole("button", { name: copy.timer.start });
@@ -699,6 +725,174 @@ describe("the cycle dots", () => {
         t(copy.timer.cycleTitle, { n: faDigits(2), total: faDigits(4) }),
       ),
     ).toBeNull();
+  });
+});
+
+describe("the settings dialog", () => {
+  /** Open it from the start screen, which is the only place it is offered. */
+  async function openSettings(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: copy.timer.settings }));
+  }
+
+  const stepper = (label: string, direction: "+" | "−") =>
+    screen.getByRole("button", { name: `${label} ${direction}` });
+
+  it("shows the three intervals the account is set to", async () => {
+    server({ intervals: { shortBreakMs: 8 * 60_000, longBreakMs: 30 * 60_000, perCycle: 3 } });
+    renderTimer();
+    await openSettings(userEvent.setup());
+
+    // The account's, not this device's: there is nothing in localStorage to
+    // read them from, and two devices may not disagree about them.
+    expect(screen.getByText(t(copy.timer.minutes, { m: faDigits(8) }))).toBeTruthy();
+    expect(screen.getByText(t(copy.timer.minutes, { m: faDigits(30) }))).toBeTruthy();
+    expect(screen.getByText(t(copy.timer.count, { n: faDigits(3) }))).toBeTruthy();
+  });
+
+  it("sends all three, with the one that was stepped changed", async () => {
+    const { saved } = server();
+    renderTimer();
+    const user = userEvent.setup();
+    await openSettings(user);
+
+    await user.click(stepper(copy.timer.settingsShortBreak, "+"));
+
+    // All three every time: there is nothing to merge, so a stepper tapped
+    // here cannot quietly revert what another device set a moment ago.
+    expect(saved).toHaveBeenCalledWith({
+      shortBreakMs: 6 * 60_000,
+      longBreakMs: 20 * 60_000,
+      perCycle: 4,
+    });
+    expect(
+      await screen.findByText(t(copy.timer.minutes, { m: faDigits(6) })),
+    ).toBeTruthy();
+  });
+
+  it("walks each interval in its own step", async () => {
+    const { saved } = server();
+    renderTimer();
+    const user = userEvent.setup();
+    await openSettings(user);
+
+    // A minute for the short break, five for the long one, one pomodoro for
+    // the cycle — the bands the server refuses anything outside of.
+    await user.click(stepper(copy.timer.settingsLongBreak, "−"));
+    expect(saved).toHaveBeenLastCalledWith(
+      expect.objectContaining({ longBreakMs: 15 * 60_000 }),
+    );
+
+    await user.click(stepper(copy.timer.settingsPerCycle, "−"));
+    expect(saved).toHaveBeenLastCalledWith(
+      expect.objectContaining({ perCycle: 3 }),
+    );
+  });
+
+  it("disables the button for a limit it has reached", async () => {
+    server({
+      intervals: { shortBreakMs: 3 * 60_000, longBreakMs: 35 * 60_000, perCycle: 6 },
+    });
+    renderTimer();
+    await openSettings(userEvent.setup());
+
+    // The end of the band is visible rather than something you discover by
+    // pressing, exactly as the pomodoro's own stepper behaves.
+    expect(stepper(copy.timer.settingsShortBreak, "−").getAttribute("disabled")).not.toBeNull();
+    expect(stepper(copy.timer.settingsShortBreak, "+").getAttribute("disabled")).toBeNull();
+    expect(stepper(copy.timer.settingsLongBreak, "+").getAttribute("disabled")).not.toBeNull();
+    expect(stepper(copy.timer.settingsPerCycle, "+").getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("reports a refused edit rather than showing a number only this device has", async () => {
+    server({ onIntervals: () => json({ error: "bad_interval", serverNow: NOW }, 400) });
+    renderTimer();
+    const user = userEvent.setup();
+    await openSettings(user);
+
+    await user.click(stepper(copy.timer.settingsShortBreak, "+"));
+
+    expect(await screen.findByText(copy.errors.badDuration)).toBeTruthy();
+    // Still five: the value on screen is the server's answer, and a tap that
+    // never landed did not change what a break is worth.
+    expect(screen.getByText(t(copy.timer.minutes, { m: faDigits(5) }))).toBeTruthy();
+  });
+
+  it("goes inert while an edit is in flight rather than counting off a stale value", async () => {
+    // The number on screen is the server's answer, so a second tap computed
+    // from the one it is about to replace would be a tap silently dropped.
+    let land!: (answer: Response) => void;
+    const held = new Promise<Response>((resolve) => {
+      land = resolve;
+    });
+    const { saved } = server({ onIntervals: () => held });
+    renderTimer();
+    const user = userEvent.setup();
+    await openSettings(user);
+
+    await user.click(stepper(copy.timer.settingsShortBreak, "+"));
+    await waitFor(() =>
+      expect(
+        stepper(copy.timer.settingsShortBreak, "+").getAttribute("disabled"),
+      ).not.toBeNull(),
+    );
+
+    await user.click(stepper(copy.timer.settingsShortBreak, "+"));
+    expect(saved).toHaveBeenCalledTimes(1);
+
+    // And live again the moment the answer lands, at the value it carried.
+    land(
+      json({
+        session: null,
+        cycle: { count: 0 },
+        intervals: { ...CLASSIC, shortBreakMs: 6 * 60_000 },
+        serverNow: NOW,
+      }),
+    );
+    expect(
+      await screen.findByText(t(copy.timer.minutes, { m: faDigits(6) })),
+    ).toBeTruthy();
+    expect(
+      stepper(copy.timer.settingsShortBreak, "+").getAttribute("disabled"),
+    ).toBeNull();
+  });
+
+  it("asks again when the tab is looked at, so another device's edit arrives", async () => {
+    // There is no socket yet, so this is what "applies on every device you have
+    // open" rests on: a tab that has been away asks the moment it is back.
+    server({ intervals: { shortBreakMs: 9 * 60_000, longBreakMs: 20 * 60_000, perCycle: 4 } });
+    renderTimer();
+    const user = userEvent.setup();
+    await openSettings(user);
+    expect(screen.getByText(t(copy.timer.minutes, { m: faDigits(9) }))).toBeTruthy();
+
+    // The account changes elsewhere; this tab comes back to the front.
+    server({ intervals: { shortBreakMs: 4 * 60_000, longBreakMs: 20 * 60_000, perCycle: 4 } });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(
+      await screen.findByText(t(copy.timer.minutes, { m: faDigits(4) })),
+    ).toBeTruthy();
+  });
+
+  it("takes the cycle it was given straight to the dots", async () => {
+    // Pomodoros-per-cycle is read at completion rather than snapshotted, so a
+    // shorter cycle is felt immediately — including by what is on screen.
+    server({ session: workSession(), cycle: { count: 1 } });
+    renderTimer();
+
+    expect(
+      await screen.findByTitle(t(copy.timer.cycleTitle, { n: faDigits(1), total: faDigits(4) })),
+    ).toBeTruthy();
+  });
+
+  it("is not offered while something is running", async () => {
+    // It is opened from the start screen, where the intervals are a decision
+    // about what comes next rather than about what is already under way.
+    server({ session: workSession() });
+    renderTimer();
+
+    await screen.findByText(CATEGORY.name);
+    expect(screen.queryByRole("button", { name: copy.timer.settings })).toBeNull();
   });
 });
 

@@ -26,9 +26,15 @@ type sessionPayload struct {
 		ResumeDurationMs *int64  `json:"resumeDurationMs"`
 	} `json:"session"`
 	Cycle struct {
-		Count    int `json:"count"`
-		PerCycle int `json:"perCycle"`
+		Count int `json:"count"`
 	} `json:"cycle"`
+	// The account's intervals travel with the timer state, because they are
+	// part of what the timer is.
+	Intervals struct {
+		ShortBreakMs int64 `json:"shortBreakMs"`
+		LongBreakMs  int64 `json:"longBreakMs"`
+		PerCycle     int   `json:"perCycle"`
+	} `json:"intervals"`
 	ServerNow int64 `json:"serverNow"`
 }
 

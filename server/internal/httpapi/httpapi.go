@@ -76,6 +76,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/categories/{id}", s.updateCategory)
 	s.mux.HandleFunc("POST /api/categories/{id}/delete", s.deleteCategory)
 
+	// The intervals are read with the timer state rather than on their own —
+	// they are part of what the timer is — so there is a write here and no read.
+	s.mux.HandleFunc("POST /api/intervals", s.setIntervals)
+
 	s.mux.HandleFunc("GET /api/session", s.getSession)
 	s.mux.HandleFunc("POST /api/session/start", s.startSession)
 	s.mux.HandleFunc("POST /api/session/{id}/cancel", s.cancelSession)

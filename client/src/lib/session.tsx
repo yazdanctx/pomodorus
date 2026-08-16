@@ -9,6 +9,7 @@ import {
 
 import { get, post, type ServerTimed } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { CLASSIC, type Intervals } from "@/lib/intervals";
 
 export type Kind = "work" | "shortBreak" | "longBreak";
 
@@ -49,17 +50,23 @@ export type Session = {
 };
 
 /**
- * How far into the cycle you are, and how long a cycle is.
+ * How far into the cycle you are.
  *
  * The server derives it from the sessions themselves on every read, so it
- * agrees across devices and cannot be lost.
+ * agrees across devices and cannot be lost. How *long* a cycle is belongs to
+ * the intervals: it is a setting, and one number held in two places is one
+ * number that can be read wrong.
  */
-export type Cycle = { count: number; perCycle: number };
+export type Cycle = { count: number };
 
-type SessionPayload = ServerTimed & { session: Session | null; cycle: Cycle };
+type SessionPayload = ServerTimed & {
+  session: Session | null;
+  cycle: Cycle;
+  intervals: Intervals;
+};
 
 /** Only ever shown once a payload has arrived; this is the shape, not a claim. */
-const NO_CYCLE: Cycle = { count: 0, perCycle: 4 };
+const NO_CYCLE: Cycle = { count: 0 };
 
 export type SessionValue = {
   /**
@@ -69,11 +76,20 @@ export type SessionValue = {
    */
   session: Session | null | undefined;
   cycle: Cycle;
+  /**
+   * What a break is worth on this account, and how long a cycle is. They ride
+   * with the timer state because they are part of what the timer is — so a
+   * device that has the session has, by the same payload, the settings it is
+   * running under.
+   */
+  intervals: Intervals;
   start: (categoryId: string, durationMs: number) => Promise<Session | null>;
   /** Abandon a pomodoro, or skip a break: the same fact, one endpoint. */
   cancel: (id: string) => Promise<void>;
   /** Acknowledge a bell, and receive whatever the timer became. */
   confirm: (id: string) => Promise<Session | null>;
+  /** Edit the account's intervals. All three, always — there is nothing to merge. */
+  save: (intervals: Intervals) => Promise<void>;
   reload: () => Promise<void>;
 };
 
@@ -137,12 +153,17 @@ function useFetchedSession(disabled: boolean): SessionValue {
   const auth = useAuth();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [cycle, setCycle] = useState<Cycle>(NO_CYCLE);
+  // The technique until the server says otherwise, which it does with the first
+  // payload. A row of four dots that turns out to be three is a smaller lie
+  // than an empty row that fills in.
+  const [intervals, setIntervals] = useState<Intervals>(CLASSIC);
 
-  // Every answer about the timer carries both, so they can never disagree:
-  // the dots and the clock are two readings of one payload.
+  // Every answer about the timer carries all three, so they can never disagree:
+  // the dots, the clock and the dialog are readings of one payload.
   const receive = useCallback((payload: SessionPayload) => {
     setSession(payload.session);
     setCycle(payload.cycle);
+    setIntervals(payload.intervals);
     return payload.session;
   }, []);
 
@@ -159,9 +180,25 @@ function useFetchedSession(disabled: boolean): SessionValue {
     if (!signedIn) {
       setSession(null);
       setCycle(NO_CYCLE);
+      setIntervals(CLASSIC);
       return;
     }
     void reload().catch(() => setSession(null));
+  }, [disabled, signedIn, reload]);
+
+  // A tab that has been in the background can have missed anything the person
+  // did elsewhere: a timer started on their phone, or the intervals edited on
+  // it. Asking again the moment it is looked at is what makes "on every device
+  // you have open" true without a socket to push it — and a failure here is
+  // left alone, because what is already on screen is still the last thing the
+  // server said.
+  useEffect(() => {
+    if (disabled || !signedIn) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void reload().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", refresh);
+    return () => document.removeEventListener("visibilitychange", refresh);
   }, [disabled, signedIn, reload]);
 
   const start = useCallback(
@@ -198,5 +235,15 @@ function useFetchedSession(disabled: boolean): SessionValue {
     [receive],
   );
 
-  return { session, cycle, start, cancel, confirm, reload };
+  // Sent whole and answered with the whole timer state, because this edit can
+  // change what a session already on screen is heading for: a shorter cycle can
+  // turn the rest the running pomodoro owes into the long one.
+  const save = useCallback(
+    async (next: Intervals) => {
+      receive(await post<SessionPayload>("/api/intervals", next));
+    },
+    [receive],
+  );
+
+  return { session, cycle, intervals, start, cancel, confirm, save, reload };
 }

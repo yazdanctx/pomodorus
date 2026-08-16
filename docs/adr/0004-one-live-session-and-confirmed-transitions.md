@@ -1,7 +1,8 @@
 # 0004 — One live session per user, and nothing advances on its own
 
 **Status:** accepted (2026-08-13); extended 2026-08-16 when breaks were built
-(#16) with the two sections at the end. The "confirmed transitions" half is
+(#16) and again when the intervals moved onto the account (#17). The
+"confirmed transitions" half is
 carried over from v1 unchanged
 (`git show v1-nextjs:docs/adr/0004-confirmed-transitions.md`).
 
@@ -78,6 +79,38 @@ path is covered by tests instead.
 Auto-advancing the chain would derive even more cleanly than this — the whole
 sequence is computable from one `started_at`. It is rejected because it credits
 you for "breaks" spent in a meeting and runs the app on without you.
+
+## The intervals are the account's, and a session keeps the ones it started with
+
+v1 kept the four intervals in localStorage, because the device owned the timer
+and those durations *are* the timer. With the server owning it (ADR 0001) they
+follow: a phone and a laptop may not disagree about how long a rest is.
+
+They are edited by `POST /api/intervals`, which is the second write in the app
+with no client-minted id (the first is the break above). It needs none: the
+dialog holds all three and sends all three, so the request is the whole of the
+setting and a retry lands on the row it already wrote. There is nothing to
+merge, and therefore nothing a second attempt could double.
+
+The three split in two, though, and the split is the decision worth recording:
+
+- **The break lengths are snapshotted.** A pomodoro copies them onto its own
+  row when it starts, and the rest it hands over is read from there. Editing
+  the dialog mid-session — or mid-ring — cannot change the break the session in
+  front of you has already earned, which is the same rule as work being
+  credited at its nominal length: a session is a stored fact, and what it owes
+  is part of that fact.
+- **Pomodoros-per-cycle is not.** It describes the cycle rather than the
+  session, is read at completion, and applies immediately — so shortening the
+  cycle while a pomodoro runs can turn the rest it is heading for into the long
+  one, and the screen says so straight away.
+
+Both are visible before the bell, because the deadline a ringing pomodoro is
+racing (`breakEndsAt`) is computed from them.
+
+Snapshotting all four instead was rejected: a cycle that only takes effect
+after the next completion has no moment anybody could point at, and "every
+fourth" would then mean whatever was true four pomodoros ago.
 
 ## Dropped from v1
 

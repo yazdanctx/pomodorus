@@ -85,21 +85,26 @@ type LoginCode struct {
 }
 
 type Session struct {
-	ID          pgtype.UUID
-	UserID      pgtype.UUID
-	Kind        SessionKind
-	CategoryID  pgtype.UUID
-	StartedAt   pgtype.Timestamptz
-	DurationMs  int64
-	EndsAt      pgtype.Timestamptz
-	ConfirmedAt pgtype.Timestamptz
-	CancelledAt pgtype.Timestamptz
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	Kind         SessionKind
+	CategoryID   pgtype.UUID
+	StartedAt    pgtype.Timestamptz
+	DurationMs   int64
+	EndsAt       pgtype.Timestamptz
+	ConfirmedAt  pgtype.Timestamptz
+	CancelledAt  pgtype.Timestamptz
+	ShortBreakMs *int64
+	LongBreakMs  *int64
 }
 
 type User struct {
-	ID          pgtype.UUID
-	Email       string
-	Handle      *string
-	CreatedAt   pgtype.Timestamptz
-	HandleSetAt pgtype.Timestamptz
+	ID           pgtype.UUID
+	Email        string
+	Handle       *string
+	CreatedAt    pgtype.Timestamptz
+	HandleSetAt  pgtype.Timestamptz
+	ShortBreakMs int64
+	LongBreakMs  int64
+	PerCycle     int32
 }

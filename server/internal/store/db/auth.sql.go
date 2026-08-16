@@ -249,7 +249,7 @@ const upsertUserByEmail = `-- name: UpsertUserByEmail :one
 INSERT INTO users (email, created_at)
 VALUES ($1, $2)
 ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-RETURNING id, email, handle, created_at, handle_set_at
+RETURNING id, email, handle, created_at, handle_set_at, short_break_ms, long_break_ms, per_cycle
 `
 
 type UpsertUserByEmailParams struct {
@@ -269,12 +269,15 @@ func (q *Queries) UpsertUserByEmail(ctx context.Context, arg UpsertUserByEmailPa
 		&i.Handle,
 		&i.CreatedAt,
 		&i.HandleSetAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
+		&i.PerCycle,
 	)
 	return i, err
 }
 
 const userForSession = `-- name: UserForSession :one
-SELECT users.id, users.email, users.handle, users.created_at, users.handle_set_at, auth_sessions.expires_at
+SELECT users.id, users.email, users.handle, users.created_at, users.handle_set_at, users.short_break_ms, users.long_break_ms, users.per_cycle, auth_sessions.expires_at
 FROM auth_sessions
 JOIN users ON users.id = auth_sessions.user_id
 WHERE auth_sessions.token_hash = $1 AND auth_sessions.expires_at > $2
@@ -299,6 +302,9 @@ func (q *Queries) UserForSession(ctx context.Context, arg UserForSessionParams) 
 		&i.User.Handle,
 		&i.User.CreatedAt,
 		&i.User.HandleSetAt,
+		&i.User.ShortBreakMs,
+		&i.User.LongBreakMs,
+		&i.User.PerCycle,
 		&i.ExpiresAt,
 	)
 	return i, err

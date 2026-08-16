@@ -21,13 +21,51 @@ const (
 // break and the cycle are all reachable in a minute rather than two hours.
 const FastElapse = 3 * time.Second
 
-// The classic technique, which is what the app is until #17 puts these on the
-// account: five minutes of rest, twenty after the fourth pomodoro.
+// Intervals are the three numbers that say what a pomodoro is worth resting
+// for, and how many of them make a set. They live on the account rather than
+// on the device — the device no longer owns the timer, so it no longer owns
+// these — and the pomodoro's own length is deliberately absent: that stays a
+// per-session decision on the start screen.
+type Intervals struct {
+	ShortBreak time.Duration
+	LongBreak  time.Duration
+	PerCycle   int
+}
+
+// Classic is the technique itself: five minutes of rest, twenty after the
+// fourth pomodoro. It is what a new account is, and what a session that
+// recorded no intervals of its own falls back to.
+var Classic = Intervals{
+	ShortBreak: 5 * time.Minute,
+	LongBreak:  20 * time.Minute,
+	PerCycle:   4,
+}
+
+// The bands each interval may be drawn from, and the steps they move in. They
+// keep the app recognisably near the technique without pretending the numbers
+// are sacred: a "short break" of a second or of an afternoon is not one, and a
+// cycle of one pomodoro is not a cycle.
 const (
-	DefaultShortBreak = 5 * time.Minute
-	DefaultLongBreak  = 20 * time.Minute
-	DefaultPerCycle   = 4
+	MinShortBreak  = 3 * time.Minute
+	MaxShortBreak  = 15 * time.Minute
+	ShortBreakStep = time.Minute
+
+	MinLongBreak  = 10 * time.Minute
+	MaxLongBreak  = 35 * time.Minute
+	LongBreakStep = 5 * time.Minute
+
+	MinPerCycle = 2
+	MaxPerCycle = 6
 )
+
+// Valid reports whether every interval is a stop the dialog's steppers can
+// reach. Checked on the server for the same reason a work length is: the
+// client is a claim, and these numbers decide how long rest lasts.
+func (i Intervals) Valid() bool {
+	return onGrid(i.ShortBreak, MinShortBreak, MaxShortBreak, ShortBreakStep) &&
+		onGrid(i.LongBreak, MinLongBreak, MaxLongBreak, LongBreakStep) &&
+		i.PerCycle >= MinPerCycle && i.PerCycle <= MaxPerCycle
+}
 
 // IdleReset is how long a timer may sit still before the cycle it was in is
 // abandoned. Four pomodoros spread across a day were never one cycle.
@@ -37,7 +75,13 @@ const IdleReset = time.Hour
 // Checked on the server because a client that could ask for any length could
 // mint focus time.
 func IsWorkDuration(d time.Duration) bool {
-	return d >= MinWork && d <= MaxWork && d%WorkStep == 0
+	return onGrid(d, MinWork, MaxWork, WorkStep)
+}
+
+// onGrid reports whether a length is a stop the stepper can actually reach:
+// inside the band, and on the step measured from the band's floor.
+func onGrid(d, floor, ceiling, step time.Duration) bool {
+	return d >= floor && d <= ceiling && (d-floor)%step == 0
 }
 
 // Kind is what a session is for. Work is the only kind that is ever credited;
@@ -81,17 +125,27 @@ func StateOf(endsAt time.Time, ended bool, now time.Time) State {
 }
 
 // BreakAfter is the rest owed for a pomodoro, given how many have been
-// completed in the cycle it closed — itself included.
+// completed in the cycle it closed — itself included — and the intervals that
+// govern it.
+//
+// The two halves of `intervals` are read from different places by the caller,
+// and deliberately so. The lengths come from the pomodoro itself, which
+// recorded them when it started, so editing them mid-session cannot change the
+// break that session already owes. The count is the account's current one,
+// because it describes the cycle rather than the session and applies to the
+// very next completion.
 //
 // The count is compared with `>=` rather than `==` so that a cycle that ran
 // past its length still offers the long break: the counter only goes back to
 // zero when a long break is actually finished or skipped, so somebody who
-// keeps declining one is owed one every time.
-func BreakAfter(completed int) (Kind, time.Duration) {
-	if completed >= DefaultPerCycle {
-		return LongBreak, DefaultLongBreak
+// keeps declining one is owed one every time. Shortening the cycle under a
+// count that has already passed it does the same thing, which is the answer
+// that edit deserves.
+func BreakAfter(completed int, intervals Intervals) (Kind, time.Duration) {
+	if completed >= intervals.PerCycle {
+		return LongBreak, intervals.LongBreak
 	}
-	return ShortBreak, DefaultShortBreak
+	return ShortBreak, intervals.ShortBreak
 }
 
 // BreakDeadline is the instant a pomodoro's owed rest runs out.

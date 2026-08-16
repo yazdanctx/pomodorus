@@ -79,28 +79,109 @@ func TestStateOf(t *testing.T) {
 }
 
 func TestBreakAfter(t *testing.T) {
+	// A cycle of two, resting differently from the classic one, so that a
+	// length or a count read from the wrong place shows up as a wrong number
+	// rather than as the right one by coincidence.
+	edited := timer.Intervals{ShortBreak: 3 * time.Minute, LongBreak: 35 * time.Minute, PerCycle: 2}
+
 	tests := []struct {
 		name      string
+		intervals timer.Intervals
 		completed int
 		wantKind  timer.Kind
 		wantLen   time.Duration
 	}{
-		{"the first of the cycle", 1, timer.ShortBreak, timer.DefaultShortBreak},
-		{"the one before last", 3, timer.ShortBreak, timer.DefaultShortBreak},
-		{"the one that closes the cycle", 4, timer.LongBreak, timer.DefaultLongBreak},
+		{"the first of the cycle", timer.Classic, 1, timer.ShortBreak, 5 * time.Minute},
+		{"the one before last", timer.Classic, 3, timer.ShortBreak, 5 * time.Minute},
+		{"the one that closes the cycle", timer.Classic, 4, timer.LongBreak, 20 * time.Minute},
 		// Somebody who keeps declining the long break is owed it every time:
 		// the counter only goes back to zero once one is actually over.
-		{"a cycle that ran past its length", 7, timer.LongBreak, timer.DefaultLongBreak},
+		{"a cycle that ran past its length", timer.Classic, 7, timer.LongBreak, 20 * time.Minute},
+
+		// The same walk over an edited account: the long break arrives at the
+		// second pomodoro rather than the fourth, and both rests are the
+		// lengths this account asked for.
+		{"the first of a shorter cycle", edited, 1, timer.ShortBreak, 3 * time.Minute},
+		{"the one that closes a shorter cycle", edited, 2, timer.LongBreak, 35 * time.Minute},
+		{"past the end of a shorter cycle", edited, 5, timer.LongBreak, 35 * time.Minute},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			kind, length := timer.BreakAfter(tc.completed)
+			kind, length := timer.BreakAfter(tc.completed, tc.intervals)
 			if kind != tc.wantKind || length != tc.wantLen {
-				t.Errorf("BreakAfter(%d) = %v/%v, want %v/%v",
-					tc.completed, kind, length, tc.wantKind, tc.wantLen)
+				t.Errorf("BreakAfter(%d, %+v) = %v/%v, want %v/%v",
+					tc.completed, tc.intervals, kind, length, tc.wantKind, tc.wantLen)
 			}
 		})
+	}
+}
+
+func TestIntervalsValid(t *testing.T) {
+	// Everything is the classic technique except the one field under test, so
+	// each case names exactly one reason to be refused.
+	with := func(change func(*timer.Intervals)) timer.Intervals {
+		out := timer.Classic
+		change(&out)
+		return out
+	}
+
+	tests := []struct {
+		name  string
+		given timer.Intervals
+		want  bool
+	}{
+		{"the technique itself", timer.Classic, true},
+		{"the shortest short break", with(func(i *timer.Intervals) { i.ShortBreak = timer.MinShortBreak }), true},
+		{"the longest short break", with(func(i *timer.Intervals) { i.ShortBreak = timer.MaxShortBreak }), true},
+		{"a step below the shortest short break", with(func(i *timer.Intervals) { i.ShortBreak = 2 * time.Minute }), false},
+		{"a step above the longest short break", with(func(i *timer.Intervals) { i.ShortBreak = 16 * time.Minute }), false},
+		{"a short break off the minute", with(func(i *timer.Intervals) { i.ShortBreak = 5*time.Minute + time.Second }), false},
+		{"no short break at all", with(func(i *timer.Intervals) { i.ShortBreak = 0 }), false},
+		{"a negative short break", with(func(i *timer.Intervals) { i.ShortBreak = -5 * time.Minute }), false},
+
+		{"the shortest long break", with(func(i *timer.Intervals) { i.LongBreak = timer.MinLongBreak }), true},
+		{"the longest long break", with(func(i *timer.Intervals) { i.LongBreak = timer.MaxLongBreak }), true},
+		{"a step below the shortest long break", with(func(i *timer.Intervals) { i.LongBreak = 5 * time.Minute }), false},
+		{"a step above the longest long break", with(func(i *timer.Intervals) { i.LongBreak = 40 * time.Minute }), false},
+		{"a long break off the five-minute step", with(func(i *timer.Intervals) { i.LongBreak = 22 * time.Minute }), false},
+		// The reason this is checked on the server at all: a rest of a working
+		// day is not a rest, and neither is one nobody can be sure ends.
+		{"a working day of rest", with(func(i *timer.Intervals) { i.LongBreak = 8 * time.Hour }), false},
+
+		{"the shortest cycle", with(func(i *timer.Intervals) { i.PerCycle = timer.MinPerCycle }), true},
+		{"the longest cycle", with(func(i *timer.Intervals) { i.PerCycle = timer.MaxPerCycle }), true},
+		{"a cycle of one", with(func(i *timer.Intervals) { i.PerCycle = 1 }), false},
+		{"a cycle of none", with(func(i *timer.Intervals) { i.PerCycle = 0 }), false},
+		{"a cycle longer than the band", with(func(i *timer.Intervals) { i.PerCycle = 7 }), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.given.Valid(); got != tc.want {
+				t.Errorf("Intervals%+v.Valid() = %v, want %v", tc.given, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryOfferedIntervalIsAccepted(t *testing.T) {
+	// The dialog's steppers walk these exact grids, so nothing they can produce
+	// may be refused by the server they are talking to.
+	for d := timer.MinShortBreak; d <= timer.MaxShortBreak; d += timer.ShortBreakStep {
+		if got := (timer.Intervals{ShortBreak: d, LongBreak: timer.Classic.LongBreak, PerCycle: timer.Classic.PerCycle}); !got.Valid() {
+			t.Errorf("the stepper offers a short break of %v and the server refuses it", d)
+		}
+	}
+	for d := timer.MinLongBreak; d <= timer.MaxLongBreak; d += timer.LongBreakStep {
+		if got := (timer.Intervals{ShortBreak: timer.Classic.ShortBreak, LongBreak: d, PerCycle: timer.Classic.PerCycle}); !got.Valid() {
+			t.Errorf("the stepper offers a long break of %v and the server refuses it", d)
+		}
+	}
+	for n := timer.MinPerCycle; n <= timer.MaxPerCycle; n++ {
+		if got := (timer.Intervals{ShortBreak: timer.Classic.ShortBreak, LongBreak: timer.Classic.LongBreak, PerCycle: n}); !got.Valid() {
+			t.Errorf("the stepper offers a cycle of %d and the server refuses it", n)
+		}
 	}
 }
 
@@ -116,20 +197,20 @@ func TestBreakEnds(t *testing.T) {
 		rang   time.Duration
 		want   time.Duration // what is left of the break, zero for none at all
 	}{
-		{"acknowledged the instant it rang", timer.DefaultShortBreak, 0, 5 * time.Minute},
-		{"ten seconds late", timer.DefaultShortBreak, 10 * time.Second, 4*time.Minute + 50*time.Second},
-		{"a millisecond before the short break is gone", timer.DefaultShortBreak, 5*time.Minute - time.Millisecond, time.Millisecond},
+		{"acknowledged the instant it rang", timer.Classic.ShortBreak, 0, 5 * time.Minute},
+		{"ten seconds late", timer.Classic.ShortBreak, 10 * time.Second, 4*time.Minute + 50*time.Second},
+		{"a millisecond before the short break is gone", timer.Classic.ShortBreak, 5*time.Minute - time.Millisecond, time.Millisecond},
 		// The boundary belongs to idleness: a break of exactly nothing is no
 		// break, and confirming drops straight back to the start screen.
-		{"exactly as long as the short break", timer.DefaultShortBreak, 5 * time.Minute, 0},
-		{"long past the short break", timer.DefaultShortBreak, time.Hour, 0},
+		{"exactly as long as the short break", timer.Classic.ShortBreak, 5 * time.Minute, 0},
+		{"long past the short break", timer.Classic.ShortBreak, time.Hour, 0},
 
 		// The long one is the same arithmetic over a longer number, which is
 		// the point of it being one function: a ring that would have eaten a
 		// short break outright leaves a quarter of an hour of this one.
-		{"five minutes into the long break", timer.DefaultLongBreak, 5 * time.Minute, 15 * time.Minute},
-		{"a millisecond before the long break is gone", timer.DefaultLongBreak, 20*time.Minute - time.Millisecond, time.Millisecond},
-		{"exactly as long as the long break", timer.DefaultLongBreak, 20 * time.Minute, 0},
+		{"five minutes into the long break", timer.Classic.LongBreak, 5 * time.Minute, 15 * time.Minute},
+		{"a millisecond before the long break is gone", timer.Classic.LongBreak, 20*time.Minute - time.Millisecond, time.Millisecond},
+		{"exactly as long as the long break", timer.Classic.LongBreak, 20 * time.Minute, 0},
 	}
 
 	for _, tc := range tests {
@@ -160,7 +241,7 @@ func TestAFastBreakStillHasToSurviveTheRing(t *testing.T) {
 	// measured on the nominal scale, or the flag that exists to make the whole
 	// chain reachable in a minute would make the break unreachable: nobody
 	// answers a bell in three seconds.
-	ends, left := timer.BreakEnds(bell, timer.DefaultShortBreak, bell.Add(time.Minute), true)
+	ends, left := timer.BreakEnds(bell, timer.Classic.ShortBreak, bell.Add(time.Minute), true)
 	if !left {
 		t.Fatal("a minute of ringing ate a five-minute break")
 	}
@@ -169,7 +250,7 @@ func TestAFastBreakStillHasToSurviveTheRing(t *testing.T) {
 	}
 
 	// And a ring that outlasts the nominal break leaves nothing, fast or not.
-	if _, left := timer.BreakEnds(bell, timer.DefaultShortBreak, bell.Add(6*time.Minute), true); left {
+	if _, left := timer.BreakEnds(bell, timer.Classic.ShortBreak, bell.Add(6*time.Minute), true); left {
 		t.Error("six minutes of ringing still bought a break")
 	}
 }

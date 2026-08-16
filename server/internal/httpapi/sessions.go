@@ -64,17 +64,71 @@ type session struct {
 // cycleState is how far into the cycle the user is. Derived from the sessions
 // themselves on every read, never stored, so two devices cannot disagree about
 // it and a restart cannot lose it.
+//
+// How long the cycle is belongs to the intervals rather than here: it is a
+// setting, and one number spelled in two places on the wire is one number that
+// can be read wrong.
 type cycleState struct {
-	Count    int `json:"count"`
-	PerCycle int `json:"perCycle"`
+	Count int `json:"count"`
+}
+
+// intervals is the account's answer to what a break is worth and how many
+// pomodoros make a set. Lengths cross the wire in milliseconds like every other
+// duration; the count is a count.
+type intervals struct {
+	ShortBreakMs int64 `json:"shortBreakMs"`
+	LongBreakMs  int64 `json:"longBreakMs"`
+	PerCycle     int   `json:"perCycle"`
 }
 
 // sessionResponse always carries the session field, null when there is no live
 // session, so the client never has to tell "no timer" from "not asked yet".
+//
+// The intervals ride along with it because they are read on the same screens
+// and change what those screens say: a device that has the timer has, by the
+// same payload, the settings the timer is running under.
 type sessionResponse struct {
 	Session   *session   `json:"session"`
 	Cycle     cycleState `json:"cycle"`
+	Intervals intervals  `json:"intervals"`
 	ServerNow int64      `json:"serverNow"`
+}
+
+// intervalsOf is the account's intervals as the domain sees them.
+func intervalsOf(user db.User) timer.Intervals {
+	return timer.Intervals{
+		ShortBreak: time.Duration(user.ShortBreakMs) * time.Millisecond,
+		LongBreak:  time.Duration(user.LongBreakMs) * time.Millisecond,
+		PerCycle:   int(user.PerCycle),
+	}
+}
+
+func asIntervals(in timer.Intervals) intervals {
+	return intervals{
+		ShortBreakMs: in.ShortBreak.Milliseconds(),
+		LongBreakMs:  in.LongBreak.Milliseconds(),
+		PerCycle:     in.PerCycle,
+	}
+}
+
+// owedBy is the intervals that decide the rest a pomodoro hands over, and it is
+// deliberately assembled from two different moments.
+//
+// The lengths are the pomodoro's own, copied off the account when it started,
+// so editing the dialog mid-session — or mid-ring — cannot change the break it
+// already owes. A row that recorded none, written before sessions carried them,
+// falls back to the account's current lengths: the closest thing to what it
+// meant.
+//
+// The count is the account's now, because it describes the cycle rather than
+// the session: shortening it is meant to be felt at the very next completion.
+func owedBy(work db.Session, user db.User) timer.Intervals {
+	in := intervalsOf(user)
+	if work.ShortBreakMs != nil && work.LongBreakMs != nil {
+		in.ShortBreak = time.Duration(*work.ShortBreakMs) * time.Millisecond
+		in.LongBreak = time.Duration(*work.LongBreakMs) * time.Millisecond
+	}
+	return in
 }
 
 // cycleWindow is how far back the cycle counter looks. An hour of idleness
@@ -155,19 +209,19 @@ func (s *Server) cycleCount(ctx context.Context, q *db.Queries, userID pgtype.UU
 // It takes its queries rather than reaching for the server's, so the handler
 // that confirms a bell can ask it from inside the transaction that started
 // the break and see its own write.
-func (s *Server) timerState(ctx context.Context, q *db.Queries, userID pgtype.UUID, now time.Time) (sessionResponse, error) {
+func (s *Server) timerState(ctx context.Context, q *db.Queries, user db.User, now time.Time) (sessionResponse, error) {
 	state := sessionResponse{
-		Cycle:     cycleState{PerCycle: timer.DefaultPerCycle},
+		Intervals: asIntervals(intervalsOf(user)),
 		ServerNow: now.UnixMilli(),
 	}
 
-	count, err := s.cycleCount(ctx, q, userID, now)
+	count, err := s.cycleCount(ctx, q, user.ID, now)
 	if err != nil {
 		return state, err
 	}
 	state.Cycle.Count = count
 
-	live, err := q.LiveSessionForUser(ctx, userID)
+	live, err := q.LiveSessionForUser(ctx, user.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return state, nil
 	}
@@ -187,10 +241,10 @@ func (s *Server) timerState(ctx context.Context, q *db.Queries, userID pgtype.UU
 		if live.Session.EndsAt.Time.After(now) {
 			completed++
 		}
-		_, length := timer.BreakAfter(completed)
+		_, length := timer.BreakAfter(completed, owedBy(live.Session, user))
 		ends := timer.BreakDeadline(live.Session.EndsAt.Time, length).UnixMilli()
 		out.BreakEndsAt = &ends
-	} else if err := s.resumeHint(ctx, q, userID, live.Session, &out); err != nil {
+	} else if err := s.resumeHint(ctx, q, user.ID, live.Session, &out); err != nil {
 		return state, err
 	}
 	state.Session = &out
@@ -245,7 +299,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := timeout(r, 5*time.Second)
 	defer cancel()
 
-	s.writeTimerState(ctx, w, user.ID, s.now())
+	s.writeTimerState(ctx, w, user, s.now())
 }
 
 type startSessionRequest struct {
@@ -298,7 +352,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if live != nil {
-		s.writeTimerState(ctx, w, user.ID, now)
+		s.writeTimerState(ctx, w, user, now)
 		return
 	}
 
@@ -324,6 +378,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		// ask for one would be a client able to mint focus time, so the flag
 		// is read from the server's own environment.
 		EndsAt: pgTime(timer.Ends(now, duration, s.cfg.FastSessions)),
+		// The rest this pomodoro will owe, taken off the account now and never
+		// read from it again. Editing the dialog while this runs — or while its
+		// bell rings — cannot change the break it already earned.
+		ShortBreakMs: &user.ShortBreakMs,
+		LongBreakMs:  &user.LongBreakMs,
 	})
 	if err != nil {
 		s.log.Error("start session", "error", err)
@@ -335,7 +394,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeTimerState(ctx, w, user.ID, now)
+	s.writeTimerState(ctx, w, user, now)
 }
 
 func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
@@ -380,7 +439,7 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 
 	// Answering with the state afterwards rather than with nothing: the caller
 	// asked to change the timer and wants to know what the timer now is.
-	s.writeTimerState(ctx, w, user.ID, now)
+	s.writeTimerState(ctx, w, user, now)
 }
 
 // confirmSession acknowledges the bell, and starts whatever break survived it.
@@ -463,7 +522,7 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case confirmed == 1:
 		if kindOf(row.Kind) == timer.Work {
-			if err := s.startBreak(ctx, q, user.ID, row, now); err != nil {
+			if err := s.startBreak(ctx, q, user, row, now); err != nil {
 				s.log.Error("start break", "error", err)
 				s.writeError(w, http.StatusInternalServerError, "server_error")
 				return
@@ -482,7 +541,7 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := s.timerState(ctx, q, user.ID, now)
+	state, err := s.timerState(ctx, q, user, now)
 	if err != nil {
 		s.log.Error("read session", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "server_error")
@@ -508,15 +567,16 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 // not something anybody asked for by name: it is a consequence of the
 // confirmation, and the transaction plus the one-live-session index are what
 // make a retried tap unable to produce a second one.
-func (s *Server) startBreak(ctx context.Context, q *db.Queries, userID pgtype.UUID, work db.Session, now time.Time) error {
+func (s *Server) startBreak(ctx context.Context, q *db.Queries, user db.User, work db.Session, now time.Time) error {
 	// The pomodoro was credited at its bell, so the count already includes it:
 	// this is the cycle it closed, and the break owed is the one that cycle
-	// earned.
-	completed, err := s.cycleCount(ctx, q, userID, now)
+	// earned — at the length that pomodoro recorded, over the cycle the account
+	// asks for now.
+	completed, err := s.cycleCount(ctx, q, user.ID, now)
 	if err != nil {
 		return err
 	}
-	kind, length := timer.BreakAfter(completed)
+	kind, length := timer.BreakAfter(completed, owedBy(work, user))
 
 	bell := work.EndsAt.Time
 	ends, left := timer.BreakEnds(bell, length, now, s.cfg.FastSessions)
@@ -528,7 +588,7 @@ func (s *Server) startBreak(ctx context.Context, q *db.Queries, userID pgtype.UU
 
 	_, err = q.StartSession(ctx, db.StartSessionParams{
 		ID:     pgID(uuid.New()),
-		UserID: userID,
+		UserID: user.ID,
 		Kind:   storedKind(kind),
 		// A break is a break: it belongs to no task, and the schema says so.
 		CategoryID: pgtype.UUID{},
@@ -538,6 +598,7 @@ func (s *Server) startBreak(ctx context.Context, q *db.Queries, userID pgtype.UU
 		// nobody's job to store that.
 		DurationMs: length.Milliseconds(),
 		EndsAt:     pgTime(ends),
+		// A break owes no break of its own, and the schema says so.
 	})
 	return err
 }
@@ -545,8 +606,8 @@ func (s *Server) startBreak(ctx context.Context, q *db.Queries, userID pgtype.UU
 // writeTimerState answers with what the timer is. Every read and every write
 // ends this way rather than with nothing: the caller changed the timer, and
 // the next thing it would ask is what the timer now is.
-func (s *Server) writeTimerState(ctx context.Context, w http.ResponseWriter, userID pgtype.UUID, now time.Time) {
-	state, err := s.timerState(ctx, s.q, userID, now)
+func (s *Server) writeTimerState(ctx context.Context, w http.ResponseWriter, user db.User, now time.Time) {
+	state, err := s.timerState(ctx, s.q, user, now)
 	if err != nil {
 		s.log.Error("read session", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "server_error")

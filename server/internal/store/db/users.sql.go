@@ -14,7 +14,7 @@ import (
 const claimHandle = `-- name: ClaimHandle :one
 UPDATE users SET handle = $2, handle_set_at = $3
 WHERE id = $1 AND handle IS NULL
-RETURNING id, email, handle, created_at, handle_set_at
+RETURNING id, email, handle, created_at, handle_set_at, short_break_ms, long_break_ms, per_cycle
 `
 
 type ClaimHandleParams struct {
@@ -37,6 +37,9 @@ func (q *Queries) ClaimHandle(ctx context.Context, arg ClaimHandleParams) (User,
 		&i.Handle,
 		&i.CreatedAt,
 		&i.HandleSetAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
+		&i.PerCycle,
 	)
 	return i, err
 }
@@ -50,4 +53,44 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const setIntervals = `-- name: SetIntervals :one
+UPDATE users SET short_break_ms = $2, long_break_ms = $3, per_cycle = $4
+WHERE id = $1
+RETURNING id, email, handle, created_at, handle_set_at, short_break_ms, long_break_ms, per_cycle
+`
+
+type SetIntervalsParams struct {
+	ID           pgtype.UUID
+	ShortBreakMs int64
+	LongBreakMs  int64
+	PerCycle     int32
+}
+
+// The account's intervals, replaced whole. There is nothing to merge: the
+// dialog holds all three and sends all three, so a stepper tapped on a phone
+// cannot quietly revert what was set on a laptop a moment ago.
+//
+// The bands are a CHECK on the table as well as a guard in the handler, so the
+// worst a bug here can do is fail.
+func (q *Queries) SetIntervals(ctx context.Context, arg SetIntervalsParams) (User, error) {
+	row := q.db.QueryRow(ctx, setIntervals,
+		arg.ID,
+		arg.ShortBreakMs,
+		arg.LongBreakMs,
+		arg.PerCycle,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Handle,
+		&i.CreatedAt,
+		&i.HandleSetAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
+		&i.PerCycle,
+	)
+	return i, err
 }

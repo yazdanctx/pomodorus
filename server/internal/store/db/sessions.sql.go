@@ -81,7 +81,7 @@ func (q *Queries) HasLiveSessionForCategory(ctx context.Context, arg HasLiveSess
 }
 
 const liveSessionForUser = `-- name: LiveSessionForUser :one
-SELECT sessions.id, sessions.user_id, sessions.kind, sessions.category_id, sessions.started_at, sessions.duration_ms, sessions.ends_at, sessions.confirmed_at, sessions.cancelled_at, categories.name AS category_name, categories.is_public AS category_is_public
+SELECT sessions.id, sessions.user_id, sessions.kind, sessions.category_id, sessions.started_at, sessions.duration_ms, sessions.ends_at, sessions.confirmed_at, sessions.cancelled_at, sessions.short_break_ms, sessions.long_break_ms, categories.name AS category_name, categories.is_public AS category_is_public
 FROM sessions
 LEFT JOIN categories ON categories.id = sessions.category_id
 WHERE sessions.user_id = $1
@@ -111,6 +111,8 @@ func (q *Queries) LiveSessionForUser(ctx context.Context, userID pgtype.UUID) (L
 		&i.Session.EndsAt,
 		&i.Session.ConfirmedAt,
 		&i.Session.CancelledAt,
+		&i.Session.ShortBreakMs,
+		&i.Session.LongBreakMs,
 		&i.CategoryName,
 		&i.CategoryIsPublic,
 	)
@@ -118,7 +120,7 @@ func (q *Queries) LiveSessionForUser(ctx context.Context, userID pgtype.UUID) (L
 }
 
 const sessionByID = `-- name: SessionByID :one
-SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at FROM sessions WHERE id = $1 AND user_id = $2
+SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at, short_break_ms, long_break_ms FROM sessions WHERE id = $1 AND user_id = $2
 `
 
 type SessionByIDParams struct {
@@ -139,12 +141,14 @@ func (q *Queries) SessionByID(ctx context.Context, arg SessionByIDParams) (Sessi
 		&i.EndsAt,
 		&i.ConfirmedAt,
 		&i.CancelledAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
 	)
 	return i, err
 }
 
 const sessionsSince = `-- name: SessionsSince :many
-SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at FROM sessions
+SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at, short_break_ms, long_break_ms FROM sessions
 WHERE user_id = $1 AND started_at >= $2
 ORDER BY started_at
 `
@@ -179,6 +183,8 @@ func (q *Queries) SessionsSince(ctx context.Context, arg SessionsSinceParams) ([
 			&i.EndsAt,
 			&i.ConfirmedAt,
 			&i.CancelledAt,
+			&i.ShortBreakMs,
+			&i.LongBreakMs,
 		); err != nil {
 			return nil, err
 		}
@@ -191,25 +197,31 @@ func (q *Queries) SessionsSince(ctx context.Context, arg SessionsSinceParams) ([
 }
 
 const startSession = `-- name: StartSession :one
-INSERT INTO sessions (id, user_id, kind, category_id, started_at, duration_ms, ends_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO sessions (id, user_id, kind, category_id, started_at, duration_ms, ends_at, short_break_ms, long_break_ms)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (id) DO UPDATE SET id = sessions.id
-RETURNING id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at
+RETURNING id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at, short_break_ms, long_break_ms
 `
 
 type StartSessionParams struct {
-	ID         pgtype.UUID
-	UserID     pgtype.UUID
-	Kind       SessionKind
-	CategoryID pgtype.UUID
-	StartedAt  pgtype.Timestamptz
-	DurationMs int64
-	EndsAt     pgtype.Timestamptz
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	Kind         SessionKind
+	CategoryID   pgtype.UUID
+	StartedAt    pgtype.Timestamptz
+	DurationMs   int64
+	EndsAt       pgtype.Timestamptz
+	ShortBreakMs *int64
+	LongBreakMs  *int64
 }
 
 // Idempotent on the client-minted id. The partial unique index is what stops a
 // second live session existing; this returns the row rather than erroring when
 // the same start is retried.
+//
+// The two break lengths are the account's, as they stood at this instant. They
+// are written once with the row and never touched again, which is what makes
+// editing the dialog mid-session unable to change the rest this session owes.
 func (q *Queries) StartSession(ctx context.Context, arg StartSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, startSession,
 		arg.ID,
@@ -219,6 +231,8 @@ func (q *Queries) StartSession(ctx context.Context, arg StartSessionParams) (Ses
 		arg.StartedAt,
 		arg.DurationMs,
 		arg.EndsAt,
+		arg.ShortBreakMs,
+		arg.LongBreakMs,
 	)
 	var i Session
 	err := row.Scan(
@@ -231,12 +245,14 @@ func (q *Queries) StartSession(ctx context.Context, arg StartSessionParams) (Ses
 		&i.EndsAt,
 		&i.ConfirmedAt,
 		&i.CancelledAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
 	)
 	return i, err
 }
 
 const workBeforeBreak = `-- name: WorkBeforeBreak :one
-SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at FROM sessions
+SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at, short_break_ms, long_break_ms FROM sessions
 WHERE user_id = $1 AND kind = 'work' AND cancelled_at IS NULL AND ends_at = $2
 `
 
@@ -264,6 +280,8 @@ func (q *Queries) WorkBeforeBreak(ctx context.Context, arg WorkBeforeBreakParams
 		&i.EndsAt,
 		&i.ConfirmedAt,
 		&i.CancelledAt,
+		&i.ShortBreakMs,
+		&i.LongBreakMs,
 	)
 	return i, err
 }

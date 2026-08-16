@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 
 import { AuthProvider, type Auth, type AuthValue } from "@/lib/auth";
+import { CLASSIC, type Intervals } from "@/lib/intervals";
 import {
   SessionProvider,
   type Cycle,
@@ -50,14 +51,17 @@ export const SIGNED_IN: Auth = { status: "authenticated", handle: "yazdan" };
  */
 export function holding(
   session: Session | null | undefined,
-  cycle: Cycle = { count: 0, perCycle: 4 },
+  cycle: Cycle = { count: 0 },
+  intervals: Intervals = CLASSIC,
 ): SessionValue {
   return {
     session,
     cycle,
+    intervals,
     start: async () => null,
     cancel: async () => {},
     confirm: async () => null,
+    save: async () => {},
     reload: async () => {},
   };
 }
