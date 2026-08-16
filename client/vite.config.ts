@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
@@ -26,6 +26,13 @@ export default defineConfig({
       "/api": { target: API, changeOrigin: true },
       "/ws": { target: API, ws: true, changeOrigin: true },
     },
+  },
+  test: {
+    // Component tests render a route and read what is on screen; the seam is
+    // at `fetch` and the WebSocket, never at a component's internals.
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    restoreMocks: true,
   },
   build: {
     // Straight into the Go binary's embed directory, so `make build` produces

@@ -1,89 +1,41 @@
-import { useEffect, useState } from "react";
+import { Route, Routes } from "react-router";
 
-import { faDigits } from "@/lib/format";
+import { NavBar } from "@/components/nav-bar";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider, type AuthValue } from "@/lib/auth";
+import { LandingRoute } from "@/routes/landing";
+import { LoginRoute } from "@/routes/login";
+import { OfflineRoute } from "@/routes/offline";
+import { ProfileRoute } from "@/routes/profile";
+import { TimerRoute } from "@/routes/timer";
 
 /**
- * Milestone 0's whole client: one round trip that proves the stack is wired —
- * browser → Vite proxy → Go → Postgres → back. It gets replaced by the real
- * routes in milestone 1 and is not a design surface, though it uses the app's
- * own type and palette so that a broken stylesheet is visible here too.
+ * The frame every screen sits inside: a centred column, thin side borders on
+ * large screens only, a dark stone surround on desktop and flush black on a
+ * phone. It is `min-h-screen` and a flex column so a route can claim the
+ * remaining height with `flex-1` without measuring anything.
  */
-type Health = {
-  ok: boolean;
-  serverNow: number;
-  env: string;
-  database: string;
-  users: number;
-};
+const FRAME =
+  "mx-auto overflow-x-hidden flex min-h-screen w-full max-w-xl flex-col border-x-0 bg-background lg:border-x lg:border-border/50";
 
-type State =
-  | { status: "loading" }
-  | { status: "ready"; health: Health; skewMs: number }
-  | { status: "error"; message: string };
-
-export function App() {
-  const [state, setState] = useState<State>({ status: "loading" });
-
-  useEffect(() => {
-    const requestedAt = Date.now();
-    fetch("/api/health")
-      .then(async (res) => {
-        const health: Health = await res.json();
-        // The measurement the whole timer will depend on: the device clock is
-        // trusted to measure elapsed time and never to say what time it is.
-        // Half the round trip is the crudest possible correction, and is
-        // replaced by a proper estimate when the socket exists.
-        const roundTrip = Date.now() - requestedAt;
-        const skewMs = Date.now() - (health.serverNow + roundTrip / 2);
-        setState({ status: "ready", health, skewMs });
-      })
-      .catch((error: unknown) => {
-        setState({
-          status: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-  }, []);
-
+export function App({ auth }: { auth?: AuthValue }) {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
-      <h1 className="text-2xl font-light tracking-widest uppercase text-yellow-600">
-        Pomodorus
-      </h1>
-
-      {state.status === "loading" && (
-        <p className="text-sm text-muted-foreground">…</p>
-      )}
-
-      {state.status === "error" && (
-        <div className="border border-border px-2.5 py-2 text-sm text-foreground">
-          {state.message}
+    <AuthProvider value={auth}>
+      <TooltipProvider>
+        <div className={FRAME}>
+          <NavBar />
+          <Routes>
+            <Route path="/" element={<LandingRoute />} />
+            <Route path="/login" element={<LoginRoute />} />
+            <Route path="/app" element={<TimerRoute />} />
+            <Route path="/u/:handle" element={<ProfileRoute />} />
+            <Route path="/offline" element={<OfflineRoute />} />
+            {/* An unknown path is a mistyped or stale link, and the landing
+                is the only page that explains what this is. */}
+            <Route path="*" element={<LandingRoute />} />
+          </Routes>
         </div>
-      )}
-
-      {state.status === "ready" && (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-          <Row label="سرور" value={state.health.ok ? "بالاست" : "پایینه"} />
-          <Row label="دیتابیس" value={state.health.database} />
-          <Row label="محیط" value={state.health.env} />
-          <Row label="کاربرها" value={faDigits(state.health.users)} />
-          <Row
-            label="اختلاف ساعت"
-            value={`${faDigits(Math.round(state.skewMs))} ms`}
-          />
-        </dl>
-      )}
-    </main>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-mono tabular-nums" dir="ltr">
-        {value}
-      </dd>
-    </>
+      </TooltipProvider>
+    </AuthProvider>
   );
 }
