@@ -9,6 +9,7 @@ import {
   type Cycle,
   type Session,
   type SessionValue,
+  type Today,
 } from "@/lib/session";
 
 /**
@@ -53,11 +54,13 @@ export function holding(
   session: Session | null | undefined,
   cycle: Cycle = { count: 0 },
   intervals: Intervals = CLASSIC,
+  today: Today | undefined = { count: 0, totalMs: 0 },
 ): SessionValue {
   return {
     session,
     cycle,
     intervals,
+    today,
     start: async () => null,
     cancel: async () => {},
     confirm: async () => null,

@@ -38,8 +38,9 @@ type Frame struct {
 	t *testing.T
 	// Type names what changed — "timer" so far.
 	Type string
-	// Timer is the timer state the frame carried, still encoded. Tests decode
-	// it into their own shape, so this package never has to know one.
+	// Timer is the state the frame carried, still encoded — whichever kind of
+	// state that is. Tests decode it into their own shape, so this package
+	// never has to know one.
 	Timer json.RawMessage
 }
 
@@ -76,12 +77,17 @@ func (c *Client) Socket() *Socket {
 			var decoded struct {
 				Type  string          `json:"type"`
 				Timer json.RawMessage `json:"timer"`
+				Feed  json.RawMessage `json:"feed"`
 			}
 			if err := json.Unmarshal(payload, &decoded); err != nil {
 				return
 			}
+			body := decoded.Timer
+			if decoded.Type == "feed" {
+				body = decoded.Feed
+			}
 			select {
-			case s.frames <- Frame{t: c.t, Type: decoded.Type, Timer: decoded.Timer}:
+			case s.frames <- Frame{t: c.t, Type: decoded.Type, Timer: body}:
 			case <-ctx.Done():
 				return
 			}
@@ -139,14 +145,60 @@ func (s *Socket) Next() Frame {
 	}
 }
 
-// NextTimer waits for the next frame and decodes the timer state it carried.
+// NextTimer waits for the next timer frame and decodes the state it carried.
+//
+// Frames of other kinds are skipped rather than failed on: everybody watching
+// their own timer is also watching the feed, and the two arrive on one socket
+// in an order neither of them promises.
 func (s *Socket) NextTimer(into any) {
 	s.t.Helper()
-	frame := s.Next()
-	if frame.Type != "timer" {
-		s.t.Fatalf("frame is %q, want %q", frame.Type, "timer")
+	s.nextOfKind("timer", into)
+}
+
+// NextFeed waits for the next feed frame and decodes it.
+func (s *Socket) NextFeed(into any) {
+	s.t.Helper()
+	s.nextOfKind("feed", into)
+}
+
+func (s *Socket) nextOfKind(kind string, into any) {
+	s.t.Helper()
+	deadline := time.After(waitFor)
+	for {
+		select {
+		case frame, open := <-s.frames:
+			if !open {
+				s.t.Fatalf("the socket closed while a %q frame was expected", kind)
+			}
+			if frame.Type == kind {
+				frame.JSON(into)
+				return
+			}
+		case <-deadline:
+			s.t.Fatalf("no %q frame arrived", kind)
+		}
 	}
-	frame.JSON(into)
+}
+
+// ExpectNoTimer asserts that no timer frame arrives, whatever else does. This
+// is how "a visitor never receives anybody's timer" is stated: the socket is
+// open and busy with the feed, and still says nothing about a timer.
+func (s *Socket) ExpectNoTimer() {
+	s.t.Helper()
+	deadline := time.After(quiet)
+	for {
+		select {
+		case frame, open := <-s.frames:
+			if !open {
+				s.t.Fatal("the socket closed, and should have stayed open")
+			}
+			if frame.Type == "timer" {
+				s.t.Fatalf("a timer frame arrived, and none should have: %s", frame.Timer)
+			}
+		case <-deadline:
+			return
+		}
+	}
 }
 
 // JSON decodes the frame's timer state.
@@ -224,6 +276,8 @@ func (c *Client) SilentSocket() *SilentSocket {
 	if _, _, err := conn.Read(ctx); err != nil {
 		c.t.Fatalf("read the opening frame: %v", err)
 	}
+	// Any further opening frames are left buffered on purpose; ExpectDropped
+	// reads past them rather than this having to know how many there are.
 
 	s := &SilentSocket{t: c.t, conn: conn}
 	c.t.Cleanup(func() { _ = conn.CloseNow() })
@@ -245,17 +299,22 @@ func (s *SilentSocket) ExpectDropped(after time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), waitFor)
 	defer cancel()
 
-	began := time.Now()
-	_, payload, err := s.conn.Read(ctx)
-	took := time.Since(began)
-
-	if err == nil {
-		s.t.Fatalf("the socket is still open after %s of silence, and delivered %s", after, payload)
-	}
-	if took > waitFor/4 {
-		s.t.Fatalf("the socket was still open after %s of silence: reading it waited %s "+
-			"to be given up on rather than reporting a connection that was already gone",
-			after, took.Round(time.Millisecond))
+	// Whatever was already buffered — the frames the socket opened onto — comes
+	// back instantly and says nothing either way. Read past it until a read
+	// actually has to wait for something.
+	for {
+		began := time.Now()
+		_, _, err := s.conn.Read(ctx)
+		took := time.Since(began)
+		if err == nil {
+			continue
+		}
+		if took > waitFor/4 {
+			s.t.Fatalf("the socket was still open after %s of silence: reading it waited %s "+
+				"to be given up on rather than reporting a connection that was already gone",
+				after, took.Round(time.Millisecond))
+		}
+		return
 	}
 }
 

@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copy, t } from "@/lib/copy";
-import { faClock, faDigits, faElapsed } from "@/lib/format";
+import { faClock, faDigits, faDuration, faElapsed } from "@/lib/format";
 import { noteServerTime } from "@/lib/server-clock";
 import { TimerRoute } from "@/routes/timer";
-import { renderAt, SIGNED_IN } from "@/test/render";
+import { holding, renderAt, SIGNED_IN } from "@/test/render";
 
 /** The timer only exists for somebody signed in, so every test starts there. */
 const renderTimer = () => renderAt(<TimerRoute />, { auth: SIGNED_IN });
@@ -30,6 +30,10 @@ type Session = {
 type Cycle = { count: number };
 /** What a break is worth on this account, and how long a cycle is. */
 type Intervals = { shortBreakMs: number; longBreakMs: number; perCycle: number };
+/** How the Tehran day has gone so far, credited at the bell. */
+type Today = { count: number; totalMs: number };
+
+const EMPTY_DAY: Today = { count: 0, totalMs: 0 };
 
 const CLASSIC: Intervals = {
   shortBreakMs: 5 * 60_000,
@@ -86,6 +90,7 @@ function server({
   session = null as Session | null,
   cycle = { count: 0 } as Cycle,
   intervals = CLASSIC,
+  today = EMPTY_DAY,
   categories = [CATEGORY],
   onStart,
   onCancel,
@@ -95,6 +100,7 @@ function server({
   session?: Session | null;
   cycle?: Cycle;
   intervals?: Intervals;
+  today?: Today;
   categories?: typeof CATEGORY[];
   onStart?: (body: Record<string, unknown>) => Response;
   onCancel?: () => Response;
@@ -138,15 +144,15 @@ function server({
       saved(body);
       return onIntervals
         ? onIntervals(body)
-        : json({ session, cycle, intervals: body, serverNow: NOW });
+        : json({ session, cycle, intervals: body, today, serverNow: NOW });
     }
     throw new Error(`unstubbed request: ${input}`);
   });
 
-  // Every answer about the timer carries the session, the cycle and the
-  // account's intervals together, exactly as the server sends them.
+  // Every answer about the timer carries the session, the cycle, the account's
+  // intervals and today's total together, exactly as the server sends them.
   const timer = ({ session }: { session: Session | null }) =>
-    json({ session, cycle, intervals, serverNow: NOW });
+    json({ session, cycle, intervals, today, serverNow: NOW });
 
   vi.stubGlobal("fetch", fetched);
   return { started, cancelled, confirmed, saved };
@@ -163,7 +169,8 @@ const timerJson = (
   session: Session | null,
   cycle: Cycle = { count: 0 },
   intervals: Intervals = CLASSIC,
-) => json({ session, cycle, intervals, serverNow: NOW });
+  today: Today = EMPTY_DAY,
+) => json({ session, cycle, intervals, today, serverNow: NOW });
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -915,5 +922,90 @@ describe("opening on a second device", () => {
     expect(
       screen.queryByRole("button", { name: copy.timer.cancelWork }),
     ).toBeNull();
+  });
+});
+
+describe("today's focus", () => {
+  it("says how the day has gone", async () => {
+    server({ today: { count: 3, totalMs: 80 * 60_000 } });
+    renderTimer();
+
+    // «امروز ۳ تا — ۱ ساعت و ۲۰ دقیقه» — the count and the total, in Persian
+    // digits, as a sentence rather than a clock.
+    await screen.findByText(
+      t(copy.timer.todaySummary, {
+        count: faDigits(3),
+        duration: faDuration(80 * 60_000),
+      }),
+    );
+  });
+
+  it("says the day is empty only once the server has said so", async () => {
+    server({ today: { count: 0, totalMs: 0 } });
+    renderTimer();
+
+    await screen.findByText(copy.timer.todayEmpty);
+  });
+
+  it("says nothing at all while it is still asking", () => {
+    // A blank row, not «امروز تمرکز نکردی کلا» — flashing that at somebody who
+    // has done four pomodoros is worse than saying nothing.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderTimer();
+
+    expect(screen.queryByText(copy.timer.todayEmpty)).toBeNull();
+  });
+
+  it("holds the row's height whether or not it knows", async () => {
+    // The reserved box, and the only state where the start screen is up while
+    // the day is still unknown: a context that has a session but no total.
+    // The row is there and empty rather than absent, so nothing above it moves
+    // when the answer lands.
+    const unknown = renderAt(<TimerRoute />, {
+      auth: SIGNED_IN,
+      // Spread rather than passed, because an explicit `undefined` argument
+      // takes a parameter's default — and the default here is a known-empty
+      // day, which is the opposite of what this asserts.
+      session: { ...holding(null), today: undefined },
+    });
+    const blank = unknown.container.querySelector("p.h-5");
+    expect(blank).toBeTruthy();
+    expect(blank?.textContent).toBe("");
+    unknown.unmount();
+
+    const known = renderAt(<TimerRoute />, {
+      auth: SIGNED_IN,
+      session: { ...holding(null), today: { count: 2, totalMs: 50 * 60_000 } },
+    });
+    const filled = known.container.querySelector("p.h-5");
+    // The same box, now with something in it.
+    expect(filled).toBeTruthy();
+    expect(filled?.textContent).toContain(faDigits(2));
+  });
+
+  it("ticks up when a pomodoro completes, without a reload", async () => {
+    // The total rides on the timer payload, so acknowledging a bell answers
+    // with the new day as part of the same response.
+    server({
+      session: workSession({ endsAt: NOW - 1000 }),
+      today: EMPTY_DAY,
+      onConfirm: () => timerJson(null, { count: 1 }, CLASSIC, {
+        count: 1,
+        totalMs: 25 * 60_000,
+      }),
+    });
+    renderTimer();
+
+    const confirm = await screen.findByRole("button", {
+      name: new RegExp(copy.timer.confirmWork),
+    });
+    await userEvent.click(confirm);
+
+    await screen.findByText(
+      t(copy.timer.todaySummary, {
+        count: faDigits(1),
+        duration: faDuration(25 * 60_000),
+      }),
+    );
   });
 });

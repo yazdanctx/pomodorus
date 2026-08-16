@@ -175,17 +175,40 @@ func TestAUserOnlyEverReceivesTheirOwnTimer(t *testing.T) {
 	theirCategory := createdCategory(t, createCategory(stranger, "کار", true)).ID
 	start(stranger, theirCategory, pomodoro).ExpectStatus(http.StatusOK)
 
-	watching.ExpectNothing()
+	// The feed says somebody started, because the feed is public and says that
+	// about everybody. The timer does not, and that is the line.
+	watching.ExpectNoTimer()
 }
 
-func TestAnAnonymousUpgradeIsRefused(t *testing.T) {
+// A visitor is welcome on the socket, because the feed has to update live on a
+// page most of its readers reach without an account. What they are not welcome
+// to is anybody's timer — and that is enforced by never subscribing them to a
+// user's topic, not by filtering frames on the way out.
+func TestAVisitorGetsTheFeedAndNeverATimer(t *testing.T) {
 	h := apitest.New(t)
+	worker, category := working(t, h)
 
-	// Refused before the upgrade, as an ordinary 401 — and refused for want of
-	// a cookie, since there is no other way to present a credential here.
-	if status := h.NewClient().SocketRefused(); status != http.StatusUnauthorized {
-		t.Errorf("the upgrade was answered %d, want %d", status, http.StatusUnauthorized)
+	watching := h.NewClient().Socket()
+	// The socket opens onto the feed without anybody signing in.
+	var opened feedPayload
+	watching.NextFeed(&opened)
+	if len(opened.Entries) != 0 {
+		t.Fatalf("the feed opened with %d entries, want none", len(opened.Entries))
 	}
+
+	started := payload(t, start(worker, category, pomodoro)).Session
+
+	var pushed feedPayload
+	watching.NextFeed(&pushed)
+	if len(pushed.Entries) != 1 || pushed.Entries[0].Handle != "yazdan" {
+		t.Fatalf("the visitor was not told who started: %+v", pushed.Entries)
+	}
+	if pushed.Entries[0].EndsAt != started.EndsAt {
+		t.Errorf("endsAt %d, want %d", pushed.Entries[0].EndsAt, started.EndsAt)
+	}
+
+	// And in all of that, not one word about anybody's timer.
+	watching.ExpectNoTimer()
 }
 
 // A cookie is attached by the browser to whoever asks, so the question the
@@ -200,14 +223,22 @@ func TestAnotherSiteCannotOpenSomebodysSocket(t *testing.T) {
 	}
 }
 
-func TestSigningOutClosesTheDoorOnANewSocket(t *testing.T) {
+// Signing out does not shut the door — the feed is public and the landing page
+// is where signing out lands you. What it shuts is the timer.
+func TestSigningOutLeavesOnlyTheFeed(t *testing.T) {
 	h := apitest.New(t)
-	client := signedIn(t, h)
+	client, category := working(t, h)
+	start(client, category, pomodoro).ExpectStatus(http.StatusOK)
 	client.POST("/api/auth/sign-out", nil).ExpectStatus(http.StatusNoContent)
 
-	if status := client.SocketRefused(); status != http.StatusUnauthorized {
-		t.Errorf("the upgrade was answered %d, want %d", status, http.StatusUnauthorized)
+	// The cookie is withdrawn, so this is a visitor now whatever it still holds.
+	after := client.Socket()
+	var opened feedPayload
+	after.NextFeed(&opened)
+	if len(opened.Entries) != 1 {
+		t.Fatalf("the feed opened with %d entries, want 1", len(opened.Entries))
 	}
+	after.ExpectNoTimer()
 }
 
 func TestKeepaliveHoldsAnIdleSocketOpen(t *testing.T) {
@@ -320,4 +351,66 @@ func TestReadingTheTimerPushesNothing(t *testing.T) {
 
 	liveSession(t, phone)
 	laptop.ExpectNothing()
+}
+
+// The feed reaches everybody watching, signed in or not, and on the same
+// connection that carries a signed-in person's own timer.
+func TestTheFeedReachesEveryWatcher(t *testing.T) {
+	h := apitest.New(t)
+	worker, category := working(t, h)
+
+	stranger := h.NewClient().Socket()
+	mine := device(t, h).Socket()
+	var opening feedPayload
+	stranger.NextFeed(&opening)
+	mine.NextFeed(&opening)
+
+	start(worker, category, pomodoro).ExpectStatus(http.StatusOK)
+
+	for name, s := range map[string]*apitest.Socket{"visitor": stranger, "signed in": mine} {
+		var pushed feedPayload
+		s.NextFeed(&pushed)
+		if len(pushed.Entries) != 1 {
+			t.Errorf("the %s watcher saw %d entries, want 1", name, len(pushed.Entries))
+		}
+	}
+}
+
+// Somebody stopping is as much a fact as somebody starting.
+func TestLeavingTheFeedIsPushed(t *testing.T) {
+	h := apitest.New(t)
+	worker, category := working(t, h)
+	started := payload(t, start(worker, category, pomodoro)).Session
+
+	watching := h.NewClient().Socket()
+	var opened feedPayload
+	watching.NextFeed(&opened)
+	if len(opened.Entries) != 1 {
+		t.Fatalf("the feed opened with %d entries, want 1", len(opened.Entries))
+	}
+
+	worker.POST("/api/session/"+started.ID+"/cancel", nil).ExpectStatus(http.StatusOK)
+
+	var pushed feedPayload
+	watching.NextFeed(&pushed)
+	if len(pushed.Entries) != 0 {
+		t.Errorf("the abandoned session is still in the pushed feed: %+v", pushed.Entries)
+	}
+}
+
+// Editing the intervals changes the timer and changes nothing about who is
+// working. This is the case the two topics exist separately for.
+func TestEditingTheIntervalsPushesNoFeed(t *testing.T) {
+	h := apitest.New(t)
+	client := signedIn(t, h)
+
+	watching := h.NewClient().Socket()
+	var opened feedPayload
+	watching.NextFeed(&opened)
+
+	client.POST("/api/intervals", map[string]any{
+		"shortBreakMs": 10 * 60 * 1000, "longBreakMs": 30 * 60 * 1000, "perCycle": 3,
+	}).ExpectStatus(http.StatusOK)
+
+	watching.ExpectNothing()
 }

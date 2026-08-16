@@ -71,3 +71,49 @@ SELECT EXISTS (
     WHERE user_id = $1 AND category_id = $2
       AND confirmed_at IS NULL AND cancelled_at IS NULL
 );
+
+-- name: CreditedBetween :one
+-- What has been credited in a window: how many pomodoros, and how long they
+-- were worth.
+--
+-- Bounded by `ends_at` rather than `started_at`, because that is when work is
+-- credited. A pomodoro that began before Tehran midnight and rang after it
+-- belongs to the new day, and one whose bell has gone counts immediately —
+-- confirming it is an acknowledgement and moves nothing.
+--
+-- `duration_ms` rather than the wall time between the two timestamps: the
+-- nominal length is what is credited, and under FAST_SESSIONS those are not
+-- the same number.
+SELECT count(*)::bigint AS count, coalesce(sum(duration_ms), 0)::bigint AS total_ms
+FROM sessions
+WHERE user_id = sqlc.arg(user_id)
+  AND kind = 'work'
+  AND cancelled_at IS NULL
+  AND ends_at >= sqlc.arg(from_time)
+  AND ends_at <= sqlc.arg(to_time);
+
+-- name: LiveFeed :many
+-- Everybody working right now, across all accounts.
+--
+-- A query over the sessions themselves rather than an advisory "who is online"
+-- table, so it cannot go stale and cannot disagree with the timer it describes.
+-- The partial index on (ends_at) where the session is live is what makes that
+-- affordable.
+--
+-- `ends_at > @now` is how somebody leaves the feed at their bell rather than at
+-- the tap that acknowledges it: ring time is not work, and advertising it as
+-- work would be advertising a pomodoro that finished twenty minutes ago.
+--
+-- An account with no handle yet is nobody the feed can name, so it is not in it.
+-- The category's name and its visibility both come back; deciding what a
+-- stranger may read is the application's job and not this query's.
+SELECT users.handle, sessions.kind, sessions.started_at, sessions.ends_at,
+       categories.name AS category_name, categories.is_public AS category_is_public
+FROM sessions
+JOIN users ON users.id = sessions.user_id
+LEFT JOIN categories ON categories.id = sessions.category_id
+WHERE sessions.confirmed_at IS NULL
+  AND sessions.cancelled_at IS NULL
+  AND sessions.ends_at > @now
+  AND users.handle IS NOT NULL
+ORDER BY sessions.started_at DESC;

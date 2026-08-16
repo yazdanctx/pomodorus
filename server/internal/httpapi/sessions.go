@@ -81,16 +81,32 @@ type intervals struct {
 	PerCycle     int   `json:"perCycle"`
 }
 
+// todayState is how the day has gone so far: the pomodoros credited since
+// Tehran midnight, and what they were worth.
+//
+// Credited at the bell rather than at the acknowledgement, which is the whole
+// reason this is a query over `ends_at` and not a counter something increments
+// — a pomodoro left ringing for an hour has already been paid for, and a
+// number that waited for the tap would disagree with the row it came from.
+type todayState struct {
+	Count   int   `json:"count"`
+	TotalMs int64 `json:"totalMs"`
+}
+
 // sessionResponse always carries the session field, null when there is no live
 // session, so the client never has to tell "no timer" from "not asked yet".
 //
 // The intervals ride along with it because they are read on the same screens
 // and change what those screens say: a device that has the timer has, by the
-// same payload, the settings the timer is running under.
+// same payload, the settings the timer is running under. Today's total rides
+// along for the same reason and one more: it is read on the start screen, it
+// changes on exactly the events that change the timer, and carrying it here
+// means it arrives on the socket without a second thing to push.
 type sessionResponse struct {
 	Session   *session   `json:"session"`
 	Cycle     cycleState `json:"cycle"`
 	Intervals intervals  `json:"intervals"`
+	Today     todayState `json:"today"`
 	ServerNow int64      `json:"serverNow"`
 }
 
@@ -198,6 +214,25 @@ func (s *Server) cycleCount(ctx context.Context, q *db.Queries, userID pgtype.UU
 	return timer.Cycle(past, now), nil
 }
 
+// today is how the day has gone so far, in the only timezone this app has a
+// day in.
+//
+// The window runs from Tehran midnight to this instant rather than to the end
+// of the day, so a session still running is not counted before its bell — the
+// upper bound is what makes "credited at the bell" a property of the query
+// instead of a rule somebody has to remember.
+func (s *Server) today(ctx context.Context, q *db.Queries, userID pgtype.UUID, now time.Time) (todayState, error) {
+	row, err := q.CreditedBetween(ctx, db.CreditedBetweenParams{
+		UserID:   userID,
+		FromTime: pgTime(timer.DayStart(now)),
+		ToTime:   pgTime(now),
+	})
+	if err != nil {
+		return todayState{}, err
+	}
+	return todayState{Count: int(row.Count), TotalMs: row.TotalMs}, nil
+}
+
 // timerState is the whole answer to "what is my timer doing": the one live
 // session if there is one, and the cycle it sits in.
 //
@@ -220,6 +255,12 @@ func (s *Server) timerState(ctx context.Context, q *db.Queries, user db.User, no
 		return state, err
 	}
 	state.Cycle.Count = count
+
+	today, err := s.today(ctx, q, user.ID, now)
+	if err != nil {
+		return state, err
+	}
+	state.Today = today
 
 	live, err := q.LiveSessionForUser(ctx, user.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -394,7 +435,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeTimerChange(ctx, w, user, now)
+	s.writeSessionChange(ctx, w, user, now)
 }
 
 func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
@@ -442,7 +483,7 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 	// other device wants to know the same thing and did not ask, which is what
 	// the push is for — a laptop left on a running countdown must not keep
 	// counting down something that was cancelled on a phone.
-	s.writeTimerChange(ctx, w, user, now)
+	s.writeSessionChange(ctx, w, user, now)
 }
 
 // confirmSession acknowledges the bell, and starts whatever break survived it.
@@ -561,6 +602,9 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 	// transaction that then rolled back, would be showing something that never
 	// happened.
 	s.publishTimer(ctx, user, state)
+	// A confirmation both takes a pomodoro out of the feed and, when a break
+	// survived the ring, puts that break into it.
+	s.publishFeed(ctx, now)
 }
 
 // startBreak begins the rest a just-acknowledged pomodoro owes, if any of it
@@ -640,4 +684,17 @@ func (s *Server) writeTimerChange(ctx context.Context, w http.ResponseWriter, us
 	if state, ok := s.writeTimerState(ctx, w, user, now); ok {
 		s.publishTimer(ctx, user, state)
 	}
+}
+
+// writeSessionChange is writeTimerChange for the three gestures that also
+// change who is working: starting, abandoning and acknowledging.
+//
+// The feed is pushed separately rather than folded into the timer's frame
+// because it is a different question with a different audience — it spans every
+// account and goes to visitors who have no timer at all. Editing the intervals
+// is the case that proves the split is worth having: it changes the timer and
+// changes nothing about who is working.
+func (s *Server) writeSessionChange(ctx context.Context, w http.ResponseWriter, user db.User, now time.Time) {
+	s.writeTimerChange(ctx, w, user, now)
+	s.publishFeed(ctx, now)
 }

@@ -15,8 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { messageFor } from "@/lib/api";
 import { useCategories } from "@/lib/categories";
-import { copy } from "@/lib/copy";
-import { faClock, faElapsed } from "@/lib/format";
+import { copy, t } from "@/lib/copy";
+import { faClock, faDigits, faDuration, faElapsed } from "@/lib/format";
 import type { Intervals } from "@/lib/intervals";
 import { usePersisted } from "@/lib/persisted";
 import { useTick } from "@/lib/server-clock";
@@ -27,6 +27,7 @@ import {
   useSession,
   type Cycle,
   type Session,
+  type Today,
 } from "@/lib/session";
 import { unlockAudio } from "@/lib/sound";
 
@@ -75,7 +76,7 @@ function sessionLabel(session: Session): string {
  * −/clock/+ row is what sets the horizontal budget on a phone.
  */
 export function TimerRoute() {
-  const { session, cycle, intervals, start, cancel, confirm, save } = useSession();
+  const { session, cycle, intervals, today, start, cancel, confirm, save } = useSession();
   // The screens are one question asked of the clock, not states anything
   // stores: before its end a session is running, after its end and
   // unacknowledged it is ringing.
@@ -143,6 +144,7 @@ export function TimerRoute() {
           intervals={intervals}
           onIntervals={save}
           notice={handover}
+          today={today}
           onStart={() => beginWork(picked, minutes * 60_000)}
         />
       ) : isRinging(session, now) ? (
@@ -185,6 +187,7 @@ function StartScreen({
   intervals,
   onIntervals,
   notice,
+  today,
   onStart,
 }: {
   categories: ReturnType<typeof useCategories>["categories"];
@@ -198,6 +201,8 @@ function StartScreen({
   onIntervals: (next: Intervals) => Promise<void>;
   /** Why the last "another one" never became a pomodoro, if it didn't. */
   notice: string | null;
+  /** How the day has gone so far, or unknown while the server has not said. */
+  today: Today | undefined;
   onStart: () => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -246,7 +251,34 @@ function StartScreen({
             them: they are a policy you set once, not a per-session choice. */}
         <SettingsDialog intervals={intervals} onSave={onIntervals} />
       </div>
+
+      <TodayLine today={today} />
     </div>
+  );
+}
+
+/**
+ * How the day has gone so far, under the panel and a step quieter than
+ * anything in it: it is the only thing on this screen that is not a control.
+ *
+ * The row holds its height whatever it knows, which is what stops the panel
+ * above it moving when the answer lands. And it says the day is empty only
+ * once the server has said so — before that it says nothing at all, because
+ * «امروز تمرکز نکردی کلا» flashed at somebody who has done four pomodoros is a
+ * worse lie than a blank line.
+ */
+function TodayLine({ today }: { today: Today | undefined }) {
+  return (
+    <p className="flex h-5 items-center justify-center pt-6 text-xs text-muted-foreground">
+      {today === undefined
+        ? null
+        : today.count === 0
+          ? copy.timer.todayEmpty
+          : t(copy.timer.todaySummary, {
+              count: faDigits(today.count),
+              duration: faDuration(today.totalMs),
+            })}
+    </p>
   );
 }
 

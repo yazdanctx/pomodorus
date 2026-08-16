@@ -27,12 +27,12 @@ import (
 // other answer, and every instant on it is absolute, so a frame that arrives
 // late still says the same thing.
 
-// frame is one pushed fact, named. There is a single kind so far; the name is
-// here from the start so the feed can share this socket later without a client
-// having to tell them apart by their shape.
+// frame is one pushed fact, named. Two kinds share this socket: your own timer,
+// which only you receive, and the feed, which everybody does.
 type frame struct {
 	Type  string           `json:"type"`
 	Timer *sessionResponse `json:"timer,omitempty"`
+	Feed  *feedResponse    `json:"feed,omitempty"`
 }
 
 // timerChanged is "your timer changed" — started, cancelled, acknowledged, or
@@ -57,27 +57,35 @@ func topicFor(user db.User) string {
 }
 
 func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
-	// Refused before the upgrade, as an ordinary 401 — and refused from the
-	// session cookie the browser attaches by itself. A token in the query
-	// string would be the same credential written into proxy logs, browser
-	// history and referrers, which is why the session is a cookie at all.
-	user, ok := s.currentUser(r)
-	if !ok {
-		s.writeError(w, http.StatusUnauthorized, "not_signed_in")
-		return
-	}
+	// Who this is, if anybody.
+	//
+	// A visitor is welcome here: the feed is the public front door and has to
+	// update live for somebody who has never signed in. So an unauthenticated
+	// upgrade is accepted rather than refused, and simply hears less — which is
+	// the whole of the rule below, expressed as which topics get subscribed to.
+	//
+	// Identity, when there is one, comes from the session cookie the browser
+	// attaches to the upgrade by itself. A token in the query string would be
+	// the same credential written into proxy logs, browser history and
+	// referrers, which is why the session is a cookie at all.
+	user, signedIn := s.currentUser(r)
 
 	// Kept, because a socket outlives the request that opened it. An HTTP
 	// handler re-reads the cookie every time and so cannot serve a withdrawn
 	// session by more than one request; a socket held open for hours would
 	// otherwise go on pushing this person's timer long after they signed out,
 	// which is the one thing a revocable session is meant not to allow.
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil {
-		s.writeError(w, http.StatusUnauthorized, "not_signed_in")
-		return
+	var token string
+	if signedIn {
+		cookie, err := r.Cookie(sessionCookie)
+		if err != nil {
+			// currentUser resolved it, so this cannot happen — and if it
+			// somehow did, the safe reading is "nobody".
+			signedIn = false
+		} else {
+			token = cookie.Value
+		}
 	}
-	token := cookie.Value
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: s.socketOrigins(),
@@ -94,13 +102,33 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
 	// between the two is delivered rather than falling down the gap. The
 	// duplicate that this can produce — the same state read and then pushed —
 	// costs a frame, and a frame is idempotent.
-	changes, unsubscribe, err := s.live.Subscribe(r.Context(), topicFor(user))
+	//
+	// Everybody watches the feed, because everybody may.
+	feed, unfeed, err := s.live.Subscribe(r.Context(), feedTopic)
 	if err != nil {
 		s.log.Error("socket: subscribe", "error", err)
 		_ = conn.Close(websocket.StatusInternalError, "subscribe failed")
 		return
 	}
-	defer unsubscribe()
+	defer unfeed()
+
+	// Only you watch your own timer. A visitor subscribes to no user's topic at
+	// all, which is a stronger guarantee than filtering on the way out: there
+	// is no channel for a timer frame to arrive on, so no bug downstream can
+	// put one there. `timers` stays nil for them, and a receive from a nil
+	// channel blocks forever — so that arm of the select below is simply never
+	// chosen.
+	var timers <-chan []byte
+	if signedIn {
+		mine, unsubscribe, err := s.live.Subscribe(r.Context(), topicFor(user))
+		if err != nil {
+			s.log.Error("socket: subscribe", "error", err)
+			_ = conn.Close(websocket.StatusInternalError, "subscribe failed")
+			return
+		}
+		defer unsubscribe()
+		timers = mine
+	}
 
 	// Nothing sent up this socket is a request. The read side exists only to
 	// answer pings, notice a close and enforce the read limit; CloseRead does
@@ -108,16 +136,25 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
 	// dies, which is what ends the loop below.
 	ctx := conn.CloseRead(r.Context())
 
-	// The first frame is the resynchronisation. A device that has just opened,
-	// and a device whose socket dropped in a tunnel and came back, are the same
-	// case: neither knows what the timer is, and neither should have to ask
-	// over HTTP to find out.
-	if payload, err := s.timerFrame(ctx, user); err != nil {
-		s.log.Error("socket: read timer", "error", err)
+	// The opening frames are the resynchronisation. A page that has just
+	// loaded, and one whose socket dropped in a tunnel and came back, are the
+	// same case: neither knows anything, and neither should have to ask over
+	// HTTP to find out.
+	if payload, err := s.feedFrame(ctx); err != nil {
+		s.log.Error("socket: read feed", "error", err)
 		_ = conn.Close(websocket.StatusInternalError, "read failed")
 		return
 	} else if !send(ctx, conn, payload) {
 		return
+	}
+	if signedIn {
+		if payload, err := s.timerFrame(ctx, user); err != nil {
+			s.log.Error("socket: read timer", "error", err)
+			_ = conn.Close(websocket.StatusInternalError, "read failed")
+			return
+		} else if !send(ctx, conn, payload) {
+			return
+		}
 	}
 
 	keepalive := time.NewTicker(s.socketPing)
@@ -127,7 +164,14 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case payload, open := <-changes:
+		case payload, open := <-feed:
+			if !open {
+				return
+			}
+			if !send(ctx, conn, payload) {
+				return
+			}
+		case payload, open := <-timers:
 			if !open {
 				return
 			}
@@ -148,7 +192,10 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request) {
 			// interval rather than whenever the connection happens to break —
 			// one indexed read per socket per interval, which is the price of
 			// "revocable instantly" meaning it here too.
-			if !s.stillSignedIn(ctx, token) {
+			//
+			// A visitor has nothing to revoke, and asking the database about
+			// them every interval would be a query per idle landing page.
+			if signedIn && !s.stillSignedIn(ctx, token) {
 				_ = conn.Close(websocket.StatusPolicyViolation, "signed out")
 				return
 			}
@@ -202,6 +249,18 @@ func (s *Server) timerFrame(ctx context.Context, user db.User) ([]byte, error) {
 
 func encodeTimer(state sessionResponse) ([]byte, error) {
 	return json.Marshal(frame{Type: timerChanged, Timer: &state})
+}
+
+// feedFrame reads who is working and encodes it as a pushed fact.
+func (s *Server) feedFrame(ctx context.Context) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	state, err := s.feed(ctx, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(frame{Type: feedChanged, Feed: &state})
 }
 
 // publishTimer pushes a timer that has just changed to the person's other

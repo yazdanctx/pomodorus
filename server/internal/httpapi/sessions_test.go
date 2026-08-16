@@ -35,6 +35,11 @@ type sessionPayload struct {
 		LongBreakMs  int64 `json:"longBreakMs"`
 		PerCycle     int   `json:"perCycle"`
 	} `json:"intervals"`
+	// How the Tehran day has gone so far, credited at the bell.
+	Today struct {
+		Count   int   `json:"count"`
+		TotalMs int64 `json:"totalMs"`
+	} `json:"today"`
 	ServerNow int64 `json:"serverNow"`
 }
 

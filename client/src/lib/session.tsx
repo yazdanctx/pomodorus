@@ -60,10 +60,22 @@ export type Session = {
  */
 export type Cycle = { count: number };
 
+/**
+ * How the Tehran day has gone so far: pomodoros credited since midnight there,
+ * and what they were worth.
+ *
+ * `undefined` until the server has said, which is the whole of the rule that
+ * only a server-confirmed total may call the day empty — a device that has not
+ * asked yet, and a device belonging to nobody, both know nothing rather than
+ * knowing zero.
+ */
+export type Today = { count: number; totalMs: number };
+
 type SessionPayload = ServerTimed & {
   session: Session | null;
   cycle: Cycle;
   intervals: Intervals;
+  today: Today;
 };
 
 /** Only ever shown once a payload has arrived; this is the shape, not a claim. */
@@ -84,6 +96,12 @@ export type SessionValue = {
    * running under.
    */
   intervals: Intervals;
+  /**
+   * The day so far, or `undefined` while it is unknown. The start screen
+   * reserves the row either way, so this being unknown costs no layout shift
+   * and never renders as an empty day.
+   */
+  today: Today | undefined;
   start: (categoryId: string, durationMs: number) => Promise<Session | null>;
   /** Abandon a pomodoro, or skip a break: the same fact, one endpoint. */
   cancel: (id: string) => Promise<void>;
@@ -158,9 +176,14 @@ function useFetchedSession(disabled: boolean): SessionValue {
   // payload. A row of four dots that turns out to be three is a smaller lie
   // than an empty row that fills in.
   const [intervals, setIntervals] = useState<Intervals>(CLASSIC);
+  // Deliberately not zero: a row that says "you did nothing today" before the
+  // server has been asked is a row that is wrong for the length of a request,
+  // and wrong in the most discouraging direction.
+  const [today, setToday] = useState<Today | undefined>(undefined);
 
-  // Every answer about the timer carries all three, so they can never disagree:
-  // the dots, the clock and the dialog are readings of one payload.
+  // Every answer about the timer carries all of them, so they can never
+  // disagree: the dots, the clock, the dialog and today's total are readings of
+  // one payload.
   //
   // The payload's `serverNow` is folded into the clock anchor by the transport
   // and not here, because only a request can be timed: a response arrives with
@@ -171,6 +194,7 @@ function useFetchedSession(disabled: boolean): SessionValue {
     setSession(payload.session);
     setCycle(payload.cycle);
     setIntervals(payload.intervals);
+    setToday(payload.today);
     return payload.session;
   }, []);
 
@@ -188,6 +212,10 @@ function useFetchedSession(disabled: boolean): SessionValue {
       setSession(null);
       setCycle(NO_CYCLE);
       setIntervals(CLASSIC);
+      // Back to unknown rather than to zero: nobody signed in has no day, and
+      // saying they focused for nothing today would be a claim about somebody
+      // the app has never met.
+      setToday(undefined);
       return;
     }
     void reload().catch(() => setSession(null));
@@ -271,5 +299,5 @@ function useFetchedSession(disabled: boolean): SessionValue {
     [receive],
   );
 
-  return { session, cycle, intervals, start, cancel, confirm, save, reload };
+  return { session, cycle, intervals, today, start, cancel, confirm, save, reload };
 }

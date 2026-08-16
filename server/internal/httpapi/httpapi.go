@@ -102,14 +102,19 @@ func (s *Server) routes() {
 	// they are part of what the timer is — so there is a write here and no read.
 	s.mux.HandleFunc("POST /api/intervals", s.setIntervals)
 
+	// The one public read in the app: who is working right now. No auth, because
+	// it is the landing page's own content and most of its readers have never
+	// signed in.
+	s.mux.HandleFunc("GET /api/feed", s.getFeed)
+
 	s.mux.HandleFunc("GET /api/session", s.getSession)
 	s.mux.HandleFunc("POST /api/session/start", s.startSession)
 	s.mux.HandleFunc("POST /api/session/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("POST /api/session/{id}/confirm", s.confirmSession)
 
 	// The one route that is not HTTP-shaped, and it carries nothing upstream:
-	// facts are pushed down it, and every change to the timer still arrives as
-	// one of the posts above.
+	// facts are pushed down it, and every change still arrives as one of the
+	// posts above. Open to visitors, who receive the feed and nothing else.
 	s.mux.HandleFunc("GET /ws", s.socket)
 
 	if h, ok := web.Handler(); ok {
