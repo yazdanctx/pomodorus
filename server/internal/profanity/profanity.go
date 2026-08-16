@@ -165,8 +165,15 @@ func isMark(r rune) bool {
 }
 
 // Persian and Arabic-Indic digits. They live inside the Arabic block, so
-// without this they would survive as letters — which is the whole point of
-// writing «ک۱ر».
+// without this they would survive as letters and «کیر۱» would be a word the
+// list has never seen.
+//
+// They become separators rather than being dropped, which is v1's rule and is
+// kept. It means a digit *substituted for* a letter — «ک۱ر» — splits the word
+// instead of folding back into it, and is not caught. Closing that would mean
+// mapping digits onto the letters they resemble, and «۱» resembles several: a
+// rule that guesses would take real task names away, and the whole list is
+// built to fail towards allowing.
 func isDigit(r rune) bool {
 	return (r >= digitFaFrom && r <= digitFaTo) || (r >= digitArFrom && r <= digitArTo)
 }

@@ -1,5 +1,4 @@
 import type * as React from "react";
-import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
@@ -7,38 +6,22 @@ import { cn } from "@/lib/utils";
  * The one box used for anything the user must actually read — a login
  * failure, the standing experimental notice, a profanity refusal.
  *
- * There is no red variant, because the theme is monochrome and `--destructive`
- * is deliberately the same grey as `--muted-foreground`. An error separates
- * itself by being full white, boxed and iconned instead: pass
- * `className="text-foreground"` on the alert and its description, and put a
- * `TriangleAlert` inside.
+ * There is deliberately no error variant. The theme is monochrome and
+ * `--destructive` is the same grey as `--muted-foreground`, so an error may
+ * not separate itself by hue: it separates itself by being full white, boxed
+ * and iconned instead. Pass `className="text-foreground"` on the alert and its
+ * description, and put a `TriangleAlert` inside — which is what `Failure`
+ * does, and what every error in the app goes through.
  */
-const alertVariants = cva(
-  "group/alert relative grid w-full gap-0.5 rounded-none border px-2.5 py-2 text-start text-sm has-data-[slot=alert-action]:pe-18 has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4",
-  {
-    variants: {
-      variant: {
-        default: "bg-card text-card-foreground",
-        destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  },
-);
+const ALERT =
+  "group/alert relative grid w-full gap-0.5 rounded-none border bg-card px-2.5 py-2 text-start text-sm text-card-foreground has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current *:[svg:not([class*='size-'])]:size-4";
 
-function Alert({
-  className,
-  variant,
-  ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+function Alert({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert"
       role="alert"
-      className={cn(alertVariants({ variant }), className)}
+      className={cn(ALERT, className)}
       {...props}
     />
   );
@@ -73,14 +56,4 @@ function AlertDescription({
   );
 }
 
-function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="alert-action"
-      className={cn("absolute top-2 end-2", className)}
-      {...props}
-    />
-  );
-}
-
-export { Alert, AlertTitle, AlertDescription, AlertAction };
+export { Alert, AlertTitle, AlertDescription };

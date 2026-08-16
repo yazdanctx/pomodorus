@@ -61,8 +61,22 @@ type Harness struct {
 	*Client
 }
 
+// An Option changes how the server under test is deployed, not what it does.
+type Option func(*config.Config, *bool)
+
+// BehindProxy stands the server behind a proxy that sets the forwarded
+// headers, and says those headers may be believed.
+func BehindProxy() Option {
+	return func(c *config.Config, _ *bool) { c.TrustProxyHeaders = true }
+}
+
+// OverTLS serves HTTPS, which is how production is reached.
+func OverTLS() Option {
+	return func(_ *config.Config, tls *bool) { *tls = true }
+}
+
 // New starts a server on a freshly emptied schema.
-func New(t *testing.T) *Harness {
+func New(t *testing.T, options ...Option) *Harness {
 	t.Helper()
 
 	pool := connect(t)
@@ -71,8 +85,19 @@ func New(t *testing.T) *Harness {
 	fixed := clock.NewFixed(Origin)
 	inbox := mail.NewMemory()
 
-	server := httptest.NewServer(httpapi.New(httpapi.Deps{
-		Config: config.Config{Env: "development", Addr: ":0"},
+	cfg := config.Config{Env: "development", Addr: ":0"}
+	overTLS := false
+	for _, option := range options {
+		option(&cfg, &overTLS)
+	}
+
+	newServer := httptest.NewServer
+	if overTLS {
+		newServer = httptest.NewTLSServer
+	}
+
+	server := newServer(httpapi.New(httpapi.Deps{
+		Config: cfg,
 		DB:     pool,
 		// Discarded rather than routed to the test log: the handlers log
 		// server errors, and a test that deliberately provokes one should not
@@ -88,6 +113,15 @@ func New(t *testing.T) *Harness {
 	return h
 }
 
+// Certificate is the httptest server's own, which a client has to trust to
+// reach it over TLS.
+func (h *Harness) transport() http.RoundTripper {
+	if h.server.TLS == nil {
+		return nil
+	}
+	return h.server.Client().Transport
+}
+
 // NewClient opens a second browser: its own cookie jar, the same server. This
 // is how "two devices" is expressed — there is nothing else to fake, because
 // the server owns the timer.
@@ -97,7 +131,12 @@ func (h *Harness) NewClient() *Client {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return &Client{t: h.t, base: h.server.URL, http: &http.Client{Jar: jar}}
+	return &Client{
+		t:       h.t,
+		base:    h.server.URL,
+		http:    &http.Client{Jar: jar, Transport: h.transport()},
+		headers: http.Header{},
+	}
 }
 
 // SignIn takes an address all the way through the login flow and returns the
@@ -111,9 +150,17 @@ func (h *Harness) SignIn(address string) *Client {
 }
 
 type Client struct {
-	t    *testing.T
-	base string
-	http *http.Client
+	t       *testing.T
+	base    string
+	http    *http.Client
+	headers http.Header
+}
+
+// From makes every later request appear to come from an address, the way a
+// proxy would report it. Whether that is believed is the server's business.
+func (c *Client) From(ip string) *Client {
+	c.headers.Set("X-Forwarded-For", ip)
+	return c
 }
 
 // SignIn requests a code, reads it out of the inbox, and verifies it.
@@ -197,6 +244,9 @@ func (c *Client) do(method, path string, body any) *Response {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	for name, values := range c.headers {
+		req.Header[name] = values
+	}
 
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -208,14 +258,34 @@ func (c *Client) do(method, path string, body any) *Response {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	return &Response{t: c.t, what: method + " " + path, Status: res.StatusCode, Body: payload}
+	return &Response{
+		t:       c.t,
+		what:    method + " " + path,
+		Status:  res.StatusCode,
+		Body:    payload,
+		Cookies: res.Cookies(),
+	}
 }
 
 type Response struct {
-	t      *testing.T
-	what   string
-	Status int
-	Body   []byte
+	t       *testing.T
+	what    string
+	Status  int
+	Body    []byte
+	Cookies []*http.Cookie
+}
+
+// Cookie returns a cookie the response set, so a test can read the attributes
+// a browser would enforce.
+func (r *Response) Cookie(name string) *http.Cookie {
+	r.t.Helper()
+	for _, cookie := range r.Cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	r.t.Fatalf("%s: set no %s cookie", r.what, name)
+	return nil
 }
 
 func (r *Response) ExpectStatus(want int) *Response {

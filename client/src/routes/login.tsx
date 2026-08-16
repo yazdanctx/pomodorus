@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { ArrowRight, KeyRound, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowRight, KeyRound, TriangleAlert } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 
+import { Failure } from "@/components/failure";
+import { SubmitButton } from "@/components/submit-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor, post, type ServerTimed } from "@/lib/api";
@@ -124,16 +125,11 @@ function EmailStep({
 
       <Failure message={error} />
 
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? (
-          <>
-            <Loader2 className="animate-spin" />
-            {copy.login.sending}
-          </>
-        ) : (
-          copy.login.sendCode
-        )}
-      </Button>
+      <SubmitButton
+        pending={pending}
+        label={copy.login.sendCode}
+        pendingLabel={copy.login.sending}
+      />
     </form>
   );
 }
@@ -218,16 +214,11 @@ function CodeStep({
 
         <Failure message={error} />
 
-        <Button type="submit" className="w-full" disabled={pending}>
-          {pending ? (
-            <>
-              <Loader2 className="animate-spin" />
-              {copy.login.signingIn}
-            </>
-          ) : (
-            copy.login.go
-          )}
-        </Button>
+        <SubmitButton
+          pending={pending}
+          label={copy.login.go}
+          pendingLabel={copy.login.signingIn}
+        />
       </form>
 
       <div className="flex items-center justify-between text-xs">
@@ -251,24 +242,3 @@ function CodeStep({
   );
 }
 
-/**
- * The theme is monochrome, so a failure cannot be red — it separates itself
- * from the grey hints around it by being full white, boxed and iconned
- * instead. The live region is always present rather than appearing with the
- * message, because a region that appears at the same time as its content is
- * not reliably announced.
- */
-function Failure({ message }: { message: string | null }) {
-  return (
-    <div aria-live="polite">
-      {message && (
-        <Alert className="text-foreground">
-          <TriangleAlert />
-          <AlertDescription className="text-foreground">
-            {message}
-          </AlertDescription>
-        </Alert>
-      )}
-    </div>
-  );
-}

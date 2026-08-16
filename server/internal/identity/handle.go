@@ -16,11 +16,6 @@ import (
 
 // The shape, restated in the database as a CHECK constraint. Both exist on
 // purpose: this one gives a readable answer, that one cannot be bypassed.
-const (
-	HandleMinLength = 3
-	HandleMaxLength = 20
-)
-
 var handlePattern = regexp.MustCompile(`^[a-z0-9_]{3,20}$`)
 
 var (

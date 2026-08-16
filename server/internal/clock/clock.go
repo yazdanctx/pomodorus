@@ -52,9 +52,3 @@ func (f *Fixed) Advance(d time.Duration) {
 	defer f.mu.Unlock()
 	f.now = f.now.Add(d)
 }
-
-func (f *Fixed) Set(at time.Time) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.now = at.UTC()
-}

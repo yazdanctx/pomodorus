@@ -117,9 +117,3 @@ func (m *Memory) Last() (Message, bool) {
 	}
 	return m.sent[len(m.sent)-1], true
 }
-
-func (m *Memory) Reset() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sent = nil
-}

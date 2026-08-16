@@ -37,7 +37,7 @@ func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.auth.RequestCode(ctx, body.Email, clientIP(r))
+	err := s.auth.RequestCode(ctx, body.Email, s.clientIP(r))
 	switch {
 	case err == nil:
 	case errors.Is(err, auth.ErrInvalidEmail):
@@ -98,8 +98,9 @@ func (s *Server) verifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.setSessionCookie(w, r, token, s.now().Add(auth.SessionTTL))
-	writeJSON(w, http.StatusOK, meResponse{Handle: user.Handle, ServerNow: s.now().UnixMilli()})
+	now := s.now()
+	s.setSessionCookie(w, r, token, now.Add(auth.SessionTTL))
+	writeJSON(w, http.StatusOK, meResponse{Handle: user.Handle, ServerNow: now.UnixMilli()})
 }
 
 func (s *Server) signOut(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +158,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 		Expires:  expires,
 		MaxAge:   int(auth.SessionTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
+		Secure:   s.isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -169,28 +170,38 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
+		Secure:   s.isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-// isHTTPS reads the connection rather than the environment. The Secure flag is
-// security-relevant and so may not be decided by a variable somebody could set
-// wrongly; in production the app sits behind a TLS-terminating proxy, which is
-// what the forwarded header is for.
-func isHTTPS(r *http.Request) bool {
+// isHTTPS reads the connection, not the environment. The Secure flag is
+// security-relevant and so may not be decided by ENV; in production the app
+// sits behind a TLS-terminating proxy, which is what the forwarded header is
+// for — and it is only believed when there is a proxy configured to set it.
+func (s *Server) isHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
+	}
+	if !s.cfg.TrustProxyHeaders {
+		return false
 	}
 	return strings.EqualFold(firstHeaderValue(r, "X-Forwarded-Proto"), "https")
 }
 
-// clientIP is used for one thing: rate limiting. It is never identity and is
-// never shown.
-func clientIP(r *http.Request) netip.Addr {
-	if forwarded := firstHeaderValue(r, "X-Forwarded-For"); forwarded != "" {
-		if addr, err := netip.ParseAddr(forwarded); err == nil {
-			return addr.Unmap()
+// clientIP is used for one thing: the per-host rate limit. It is never
+// identity and is never shown.
+//
+// The forwarded header is believed only behind a proxy configured to set it.
+// Anyone can send that header, so trusting it unconditionally would mean a
+// caller who varies it per request looks like a fresh host every time — which
+// is the per-host limit not existing at all.
+func (s *Server) clientIP(r *http.Request) netip.Addr {
+	if s.cfg.TrustProxyHeaders {
+		if forwarded := firstHeaderValue(r, "X-Forwarded-For"); forwarded != "" {
+			if addr, err := netip.ParseAddr(forwarded); err == nil {
+				return addr.Unmap()
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

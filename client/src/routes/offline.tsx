@@ -5,8 +5,15 @@ import { copy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 
 /**
- * The service worker's navigation fallback: shown when an uncached page is
- * opened with no network.
+ * The service worker's navigation fallback, shown when a page is opened with
+ * no network. The worker that reaches it arrives in #25; the page is here
+ * because it is v1 markup and copy that would otherwise have to be
+ * reconstructed later.
+ *
+ * The heading's `text-2xl font-black` is v1's, ported verbatim. It is not a
+ * row in the type scale in docs/design-tokens.md because that table records
+ * the scale's shared roles, not every one-off — and the design is fixed, so
+ * the v1 markup wins over a value picked to fit the table.
  */
 export function OfflineRoute() {
   return (

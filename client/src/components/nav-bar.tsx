@@ -4,7 +4,7 @@ import { Link, useLocation } from "react-router";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type Auth } from "@/lib/auth";
 import { copy } from "@/lib/copy";
 
 /** The two screens that are their own whole page and carry no chrome. */
@@ -50,24 +50,23 @@ function AuthCta({ auth }: { auth: ReturnType<typeof useAuth> }) {
     return <Skeleton className={CTA_BOX} data-testid="nav-cta-placeholder" />;
   }
 
-  // Signed in without a handle yet: there is no profile to link to, so the CTA
-  // points back at the app, which is where the claim step lives.
-  const to =
-    auth.status === "authenticated"
-      ? auth.handle === null
-        ? "/app"
-        : `/u/${auth.handle}`
-      : "/login";
-  const label =
-    auth.status === "authenticated"
-      ? auth.handle === null
-        ? copy.header.timer
-        : copy.header.myProfile
-      : copy.landing.enter;
-
+  const { to, label } = destination(auth);
   return (
     <Button asChild size="sm" variant="outline" className={CTA_BOX}>
       <Link to={to}>{label}</Link>
     </Button>
   );
+}
+
+/** Where the CTA goes and what it says — decided once, from one state. */
+function destination(auth: Auth): { to: string; label: string } {
+  if (auth.status !== "authenticated") {
+    return { to: "/login", label: copy.landing.enter };
+  }
+  // Signed in without a handle yet: there is no profile to link to, so the CTA
+  // points back at the app, which is where the claim step lives.
+  if (auth.handle === null) {
+    return { to: "/app", label: copy.header.timer };
+  }
+  return { to: `/u/${auth.handle}`, label: copy.header.myProfile };
 }

@@ -78,8 +78,10 @@ func (s *Server) routes() {
 	}
 }
 
-// now is the instant every response reports and every handler reasons from,
-// read once per request so a handler cannot see two different "now"s.
+// now is the instant handlers reason from and every response reports. It reads
+// the injected clock, which is what makes the whole timer testable by moving
+// one value — a handler that needs two timestamps to agree reads this once
+// into a variable rather than calling it twice.
 func (s *Server) now() time.Time { return s.clock.Now() }
 
 type healthResponse struct {

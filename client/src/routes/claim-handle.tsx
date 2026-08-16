@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
-import { Loader2, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
+import { Failure } from "@/components/failure";
+import { SubmitButton } from "@/components/submit-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor, post } from "@/lib/api";
@@ -97,27 +98,13 @@ export function ClaimHandleRoute() {
             {handle && t(copy.handle.preview, { handle })}
           </p>
 
-          <div aria-live="polite">
-            {error && (
-              <Alert className="text-foreground">
-                <TriangleAlert />
-                <AlertDescription className="text-foreground">
-                  {error}
-                </AlertDescription>
-              </Alert>
-            )}
-          </div>
+          <Failure message={error} />
 
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? (
-              <>
-                <Loader2 className="animate-spin" />
-                {copy.handle.claiming}
-              </>
-            ) : (
-              copy.handle.claim
-            )}
-          </Button>
+          <SubmitButton
+            pending={pending}
+            label={copy.handle.claim}
+            pendingLabel={copy.handle.claiming}
+          />
         </form>
 
         {/* The only way out of a half-made account that is not picking a name.

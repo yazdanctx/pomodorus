@@ -24,12 +24,26 @@ type Config struct {
 	// unlimited focus time.
 	FastSessions bool
 
+	// TrustProxyHeaders says the server is behind a proxy that sets
+	// X-Forwarded-For and X-Forwarded-Proto, and that those headers may
+	// therefore be believed.
+	//
+	// Off by default, because a header anyone can set is a header that defeats
+	// the per-host rate limit: without a proxy in front, a caller who sends a
+	// fresh X-Forwarded-For on every request looks like a fresh host every
+	// time. This is a fact about the deployment, not a security toggle — the
+	// unsafe direction is the one that needs saying out loud.
+	TrustProxyHeaders bool
+
 	// Where login codes are posted. Locally this is Mailpit; in production it
 	// is the host's own email service. The same client runs in both, so what
 	// is exercised in development is the code path that ships.
 	SMTP SMTPConfig
 }
 
+// SMTPConfig deliberately mirrors mail.SMTPConfig rather than being it: the
+// config package reads the environment and should not depend on how anything
+// is delivered. The conversion in cmd/server is the seam, and it is one line.
 type SMTPConfig struct {
 	Host     string
 	Port     string
@@ -44,9 +58,10 @@ func Load() (Config, error) {
 		// 8081 and 5433 rather than the obvious 8080 and 5432: this machine
 		// already runs a native Postgres on 5432 and something else on 8080,
 		// and a default that collides is a default that wastes an afternoon.
-		Addr:         env("ADDR", ":8081"),
-		DatabaseURL:  env("DATABASE_URL", "postgres://pomodorus:pomodorus@localhost:5433/pomodorus?sslmode=disable"),
-		FastSessions: env("FAST_SESSIONS", "") == "1",
+		Addr:              env("ADDR", ":8081"),
+		DatabaseURL:       env("DATABASE_URL", "postgres://pomodorus:pomodorus@localhost:5433/pomodorus?sslmode=disable"),
+		FastSessions:      env("FAST_SESSIONS", "") == "1",
+		TrustProxyHeaders: env("TRUST_PROXY_HEADERS", "") == "1",
 		SMTP: SMTPConfig{
 			Host:     env("SMTP_HOST", "localhost"),
 			Port:     env("SMTP_PORT", "1025"),

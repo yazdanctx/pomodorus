@@ -51,37 +51,3 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	err := row.Scan(&count)
 	return count, err
 }
-
-const userByHandle = `-- name: UserByHandle :one
-SELECT id, email, handle, created_at, handle_set_at FROM users WHERE handle = $1
-`
-
-func (q *Queries) UserByHandle(ctx context.Context, handle *string) (User, error) {
-	row := q.db.QueryRow(ctx, userByHandle, handle)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.Handle,
-		&i.CreatedAt,
-		&i.HandleSetAt,
-	)
-	return i, err
-}
-
-const userByID = `-- name: UserByID :one
-SELECT id, email, handle, created_at, handle_set_at FROM users WHERE id = $1
-`
-
-func (q *Queries) UserByID(ctx context.Context, id pgtype.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, userByID, id)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.Handle,
-		&i.CreatedAt,
-		&i.HandleSetAt,
-	)
-	return i, err
-}

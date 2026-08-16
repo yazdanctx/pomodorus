@@ -32,28 +32,47 @@ func TestContainsAnywhereInALabel(t *testing.T) {
 }
 
 func TestFoldingRules(t *testing.T) {
+	// Each rule gets both directions: the spelling it is meant to see through,
+	// and an ordinary word the same rule must not swallow. The negative half
+	// is the one that matters — a false positive takes a real person's task
+	// name away.
 	tests := []struct {
-		rule string
-		text string
+		rule    string
+		profane string
+		fine    string
 	}{
-		{"a suffix does not make it a different word", "سکسی"},
-		{"nor does a possessive one", "کیرم"},
-		{"a two-word term typed apart", "کس کش"},
-		{"…and the same term joined by a zero-width non-joiner", "کس‌کش"},
-		{"…and joined outright", "کسکش"},
-		{"a stretched letter is the same letter", "سکسییییی"},
-		{"a vowel mark is invisible and changes nothing", "سِکس"},
-		{"an Arabic keyboard produces the same word", "كير"},
-		{"a tatweel stretches without changing", "كــير"},
-		{"a Persian digit standing in for a letter", "کیر۱"},
+		{"a suffix does not make it a different word", "سکسی", "کسی"},
+		{"nor does a possessive one", "کیرم", "کارم"},
+		{"a two-word term typed apart", "کس کش", "هیچ کس"},
+		{"a zero-width non-joiner splits nothing", "کس‌کش", "می‌خونم"},
+		{"a joined-up spelling is the same term", "کسکش", "کارکشته"},
+		{"a stretched letter is the same letter", "سکسییییی", "خیییلی خوب"},
+		{"a vowel mark is invisible", "سِکس", "کِتاب خوندن"},
+		{"an Arabic keyboard produces the same letters", "كير", "كتاب"},
+		{"a tatweel stretches without changing", "كــير", "كــتاب"},
+		{"a trailing digit does not hide the word", "کیر۱", "پروژه ۲"},
+		{"a Latin term is read whole", "koskesh", "kosar"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.rule, func(t *testing.T) {
-			if !profanity.Contains(tc.text) {
-				t.Errorf("Contains(%q) = false, want true", tc.text)
+			if !profanity.Contains(tc.profane) {
+				t.Errorf("Contains(%q) = false, want true", tc.profane)
+			}
+			if profanity.Contains(tc.fine) {
+				t.Errorf("Contains(%q) = true, want false", tc.fine)
 			}
 		})
+	}
+}
+
+// A digit substituted for a letter splits the word rather than folding back
+// into it, so it is not caught. Recorded as the known limit it is, carried
+// over from v1: closing it would mean guessing which letter a digit stands
+// for, and a rule that guesses costs real task names.
+func TestADigitSubstitutedForALetterIsNotCaught(t *testing.T) {
+	if profanity.Contains("ک۱ر") {
+		t.Error(`Contains("ک۱ر") = true — the rule changed, so update the note on isDigit`)
 	}
 }
 

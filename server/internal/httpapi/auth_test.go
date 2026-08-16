@@ -306,3 +306,74 @@ func wrongCode(right string) string {
 func addressN(n int) string {
 	return fmt.Sprintf("person%d@example.com", n)
 }
+
+func TestTheSessionCookieIsInvisibleToJavaScriptAndNotSentCrossSite(t *testing.T) {
+	h := apitest.New(t)
+	client := h.NewClient()
+	requestCode(client, address).ExpectStatus(http.StatusOK)
+
+	cookie := verify(client, address, h.LastCode(address)).
+		ExpectStatus(http.StatusOK).
+		Cookie("pomodorus_session")
+
+	if !cookie.HttpOnly {
+		t.Error("the cookie is readable by JavaScript")
+	}
+	if cookie.SameSite != http.SameSiteLaxMode {
+		t.Errorf("SameSite is %v, want Lax", cookie.SameSite)
+	}
+	if cookie.Path != "/" {
+		t.Errorf("Path is %q, want /", cookie.Path)
+	}
+	// Opaque: 32 random bytes, not a token anything can read a claim out of.
+	if len(cookie.Value) < 32 {
+		t.Errorf("the token is %d characters, which is not 32 random bytes", len(cookie.Value))
+	}
+}
+
+func TestTheSessionCookieIsSecureWhereverTheConnectionIs(t *testing.T) {
+	h := apitest.New(t, apitest.OverTLS())
+	client := h.NewClient()
+	requestCode(client, address).ExpectStatus(http.StatusOK)
+
+	cookie := verify(client, address, h.LastCode(address)).
+		ExpectStatus(http.StatusOK).
+		Cookie("pomodorus_session")
+
+	if !cookie.Secure {
+		t.Error("the cookie is sent over TLS without Secure")
+	}
+}
+
+func TestAForgedForwardedHeaderDoesNotDefeatThePerHostLimit(t *testing.T) {
+	h := apitest.New(t)
+
+	// Nothing is in front of this server, so the header is a header anybody
+	// can send — and believing it would mean a caller who varies it per
+	// request looks like a fresh host every time.
+	for i := range auth.MaxCodesPerIP {
+		h.Client.From(fmt.Sprintf("203.0.113.%d", i))
+		if requestCode(h.Client, addressN(i/2)).Status != http.StatusOK {
+			t.Fatalf("request %d was refused before the limit", i+1)
+		}
+	}
+	h.Client.From("203.0.113.250")
+	requestCode(h.Client, addressN(99)).ExpectError(http.StatusTooManyRequests, "rate_limited")
+}
+
+func TestBehindAProxyTheForwardedAddressIsWhatCounts(t *testing.T) {
+	h := apitest.New(t, apitest.BehindProxy())
+
+	// Every request arrives from the proxy's own socket, so without reading
+	// the header every user behind it would share one limit.
+	exhausted := h.NewClient().From("203.0.113.1")
+	for i := range auth.MaxCodesPerIP {
+		if requestCode(exhausted, addressN(i/2)).Status != http.StatusOK {
+			t.Fatalf("request %d was refused before the limit", i+1)
+		}
+	}
+	requestCode(exhausted, addressN(99)).ExpectError(http.StatusTooManyRequests, "rate_limited")
+
+	// Somebody else behind the same proxy is unaffected.
+	requestCode(h.NewClient().From("203.0.113.2"), addressN(99)).ExpectStatus(http.StatusOK)
+}

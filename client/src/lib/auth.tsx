@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { get, type ServerTimed } from "@/lib/api";
+
 /**
  * Who the browser is, as far as the server is concerned.
  *
@@ -57,16 +59,12 @@ function useFetchedAuth(disabled: boolean): AuthValue {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/me");
-      if (res.status === 401 || res.status === 404) {
-        setAuth({ status: "anonymous" });
-        return;
-      }
-      const body: { handle: string | null } = await res.json();
-      setAuth({ status: "authenticated", handle: body.handle });
+      const me = await get<ServerTimed & { handle: string | null }>("/api/me");
+      setAuth({ status: "authenticated", handle: me.handle });
     } catch {
-      // A request that never arrived says nothing about who you are, so the
-      // safe reading is the one that offers a way back in.
+      // Not signed in, and a request that never arrived, resolve the same way:
+      // neither says who you are, and the safe reading is the one that leaves
+      // a way back in on screen.
       setAuth({ status: "anonymous" });
     }
   }, []);
