@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yazdanctx/pomodorus/server/internal/clock"
 	"github.com/yazdanctx/pomodorus/server/internal/config"
 	"github.com/yazdanctx/pomodorus/server/internal/httpapi"
+	"github.com/yazdanctx/pomodorus/server/internal/mail"
 	"github.com/yazdanctx/pomodorus/server/internal/store"
 )
 
@@ -44,8 +46,14 @@ func run(log *slog.Logger) error {
 	log.Info("database ready, schema up to date")
 
 	srv := &http.Server{
-		Addr:    cfg.Addr,
-		Handler: httpapi.New(cfg, db, log),
+		Addr: cfg.Addr,
+		Handler: httpapi.New(httpapi.Deps{
+			Config: cfg,
+			DB:     db,
+			Log:    log,
+			Clock:  clock.System(),
+			Mailer: mail.NewSMTP(mail.SMTPConfig(cfg.SMTP)),
+		}),
 		// Generous but finite: a WebSocket upgrade will opt out of the write
 		// deadline itself, and nothing else here is long-lived.
 		ReadHeaderTimeout: 10 * time.Second,

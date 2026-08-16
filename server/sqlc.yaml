@@ -1,0 +1,23 @@
+version: "2"
+sql:
+  - engine: postgresql
+    # The migrations are the schema. There is no second copy to drift.
+    schema: internal/migrations
+    queries: internal/store/queries
+    gen:
+      go:
+        package: db
+        out: internal/store/db
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_json_tags: false
+        overrides:
+          # sqlc has no built-in mapping for citext; it is text that compares
+          # case-insensitively, so a Go string is exactly right.
+          - db_type: "citext"
+            go_type: "string"
+          - db_type: "citext"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true

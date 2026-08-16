@@ -23,6 +23,19 @@ type Config struct {
 	// that could ask for a fast session would be a request that could mint
 	// unlimited focus time.
 	FastSessions bool
+
+	// Where login codes are posted. Locally this is Mailpit; in production it
+	// is the host's own email service. The same client runs in both, so what
+	// is exercised in development is the code path that ships.
+	SMTP SMTPConfig
+}
+
+type SMTPConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	From     string
 }
 
 func Load() (Config, error) {
@@ -34,6 +47,13 @@ func Load() (Config, error) {
 		Addr:         env("ADDR", ":8081"),
 		DatabaseURL:  env("DATABASE_URL", "postgres://pomodorus:pomodorus@localhost:5433/pomodorus?sslmode=disable"),
 		FastSessions: env("FAST_SESSIONS", "") == "1",
+		SMTP: SMTPConfig{
+			Host:     env("SMTP_HOST", "localhost"),
+			Port:     env("SMTP_PORT", "1025"),
+			Username: env("SMTP_USERNAME", ""),
+			Password: env("SMTP_PASSWORD", ""),
+			From:     env("SMTP_FROM", "Pomodorus <no-reply@pomodorus.local>"),
+		},
 	}
 
 	if c.DatabaseURL == "" {

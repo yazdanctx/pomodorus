@@ -1,0 +1,90 @@
+/**
+ * The transport, and the only place `fetch` is called.
+ *
+ * Every mutation is an ordinary POST with a real status code; the WebSocket
+ * only ever pushes facts. So errors have HTTP semantics here and nowhere else,
+ * and a route never has to reason about a status.
+ *
+ * The server answers with a machine-readable code, never a sentence — every
+ * word of Persian in the product lives in copy.json, and a message from the
+ * server would be a second place for it to live.
+ */
+
+import { copy } from "@/lib/copy";
+
+/** Every response carries the server's clock, so the client can correct skew. */
+export type ServerTimed = { serverNow: number };
+
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+  ) {
+    super(`${status} ${code}`);
+    this.name = "ApiError";
+  }
+}
+
+/** The code a request that never arrived reports as. */
+export const OFFLINE = "offline";
+
+export async function get<T>(path: string): Promise<T> {
+  return request<T>("GET", path);
+}
+
+export async function post<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>("POST", path, body);
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    // A request that never left the device says nothing about the server.
+    throw new ApiError(OFFLINE, 0);
+  }
+
+  if (response.status === 204) return undefined as T;
+
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const code =
+      payload && typeof payload === "object" && "error" in payload
+        ? String(payload.error)
+        : "server_error";
+    throw new ApiError(code, response.status);
+  }
+  return payload as T;
+}
+
+/**
+ * The sentence to put in front of the user for a failure.
+ *
+ * An unrecognised code falls back to the generic apology rather than being
+ * shown raw: a version skew reading as a specific, wrong explanation is what
+ * once sent everybody hunting for a password they had typed correctly.
+ */
+export function messageFor(error: unknown): string {
+  const code = error instanceof ApiError ? error.code : "server_error";
+  switch (code) {
+    case "invalid_email":
+      return copy.login.invalidEmail;
+    case "rate_limited":
+      return copy.login.rateLimited;
+    case "bad_code":
+      return copy.login.badCode;
+    case OFFLINE:
+      return copy.offline.needInternet;
+    default:
+      return copy.login.serverError;
+  }
+}

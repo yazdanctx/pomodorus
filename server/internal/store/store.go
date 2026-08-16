@@ -47,10 +47,24 @@ func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// Migrate brings the schema up to date. It runs over a throwaway database/sql
-// handle because that is the only thing goose speaks; everything else in the
-// app uses pgx directly.
+// Migrate brings the schema up to date, using the connection's own search
+// path — which in production is the one schema there is.
 func Migrate(ctx context.Context, databaseURL string) error {
+	return MigrateSchema(ctx, databaseURL, "")
+}
+
+// MigrateSchema migrates into a named schema.
+//
+// The name is needed for one reason: goose keeps its bookkeeping in a
+// goose_db_version table, and an unqualified name resolves against the whole
+// search path. The test harness migrates a throwaway schema while keeping
+// public on the path so the citext extension resolves, and without qualifying
+// the version table goose would read public's, conclude the throwaway schema
+// was already up to date, and create nothing at all.
+//
+// It runs over a throwaway database/sql handle because that is the only thing
+// goose speaks; everything else in the app uses pgx directly.
+func MigrateSchema(ctx context.Context, databaseURL, schema string) error {
 	connCfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
 		return fmt.Errorf("parse DATABASE_URL: %w", err)
@@ -61,6 +75,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 
 	goose.SetBaseFS(migrations.FS)
 	goose.SetLogger(goose.NopLogger())
+	if schema != "" {
+		goose.SetTableName(schema + ".goose_db_version")
+	}
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("goose dialect: %w", err)
 	}
