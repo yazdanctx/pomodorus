@@ -69,6 +69,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/verify", s.verifyCode)
 	s.mux.HandleFunc("POST /api/auth/sign-out", s.signOut)
 	s.mux.HandleFunc("GET /api/me", s.me)
+	s.mux.HandleFunc("POST /api/handle", s.claimHandle)
 
 	if h, ok := web.Handler(); ok {
 		s.mux.Handle("/", h)

@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router";
 
 import { NavBar } from "@/components/nav-bar";
+import { RequireHandle } from "@/components/require-handle";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, type AuthValue } from "@/lib/auth";
 import { LandingRoute } from "@/routes/landing";
@@ -27,7 +28,14 @@ export function App({ auth }: { auth?: AuthValue }) {
           <Routes>
             <Route path="/" element={<LandingRoute />} />
             <Route path="/login" element={<LoginRoute />} />
-            <Route path="/app" element={<TimerRoute />} />
+            <Route
+              path="/app"
+              element={
+                <RequireHandle>
+                  <TimerRoute />
+                </RequireHandle>
+              }
+            />
             <Route path="/u/:handle" element={<ProfileRoute />} />
             <Route path="/offline" element={<OfflineRoute />} />
             {/* An unknown path is a mistyped or stale link, and the landing

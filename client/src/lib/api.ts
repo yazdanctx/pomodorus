@@ -82,6 +82,15 @@ export function messageFor(error: unknown): string {
       return copy.login.rateLimited;
     case "bad_code":
       return copy.login.badCode;
+    // Three distinct reasons, because "taken", "not allowed" and "wrong
+    // shape" are different problems and guessing which is which is exactly
+    // what leaves somebody stuck.
+    case "handle_invalid":
+      return copy.errors.usernameInvalid;
+    case "handle_taken":
+      return copy.errors.usernameTaken;
+    case "handle_profane":
+      return copy.errors.usernameProfane;
     case OFFLINE:
       return copy.offline.needInternet;
     default:
