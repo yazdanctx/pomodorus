@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { copy } from "@/lib/copy";
+import { copy, t } from "@/lib/copy";
 import { faClock, faDigits, faElapsed } from "@/lib/format";
 import { noteServerTime } from "@/lib/server-clock";
 import { TimerRoute } from "@/routes/timer";
@@ -22,16 +22,51 @@ type Session = {
   startedAt: number;
   endsAt: number;
   durationMs: number;
+  breakEndsAt: number | null;
+  resumeCategoryId: string | null;
+  resumeDurationMs: number | null;
 };
 
-const workSession = (over: Partial<Session> = {}): Session => ({
-  id: "s1",
-  kind: "work",
-  categoryId: CATEGORY.id,
-  categoryName: CATEGORY.name,
+type Cycle = { count: number; perCycle: number };
+
+const SHORT_BREAK = 5 * 60_000;
+
+const workSession = (over: Partial<Session> = {}): Session => {
+  const endsAt = over.endsAt ?? NOW + 25 * 60_000;
+  return {
+    id: "s1",
+    kind: "work",
+    categoryId: CATEGORY.id,
+    categoryName: CATEGORY.name,
+    startedAt: NOW,
+    durationMs: 25 * 60_000,
+    // The rest it owes, anchored at its own end: the ring is spent out of it,
+    // so this instant does not move however late the bell is answered.
+    breakEndsAt: endsAt + SHORT_BREAK,
+    resumeCategoryId: null,
+    resumeDurationMs: null,
+    ...over,
+    endsAt,
+  };
+};
+
+/**
+ * The break a pomodoro handed over, as the server sends it: it *began* at that
+ * pomodoro's nominal end, which is why a break started after a two-minute ring
+ * has two minutes already gone.
+ */
+const breakSession = (over: Partial<Session> = {}): Session => ({
+  id: "b1",
+  kind: "shortBreak",
+  categoryId: null,
+  categoryName: null,
   startedAt: NOW,
-  endsAt: NOW + 25 * 60_000,
-  durationMs: 25 * 60_000,
+  endsAt: NOW + SHORT_BREAK,
+  durationMs: SHORT_BREAK,
+  breakEndsAt: null,
+  // What "another one" resumes, read off the pomodoro this break followed.
+  resumeCategoryId: CATEGORY.id,
+  resumeDurationMs: 25 * 60_000,
   ...over,
 });
 
@@ -41,12 +76,14 @@ const workSession = (over: Partial<Session> = {}): Session => ({
  */
 function server({
   session = null as Session | null,
+  cycle = { count: 0, perCycle: 4 } as Cycle,
   categories = [CATEGORY],
   onStart,
   onCancel,
   onConfirm,
 }: {
   session?: Session | null;
+  cycle?: Cycle;
   categories?: typeof CATEGORY[];
   onStart?: (body: Record<string, unknown>) => Response;
   onCancel?: () => Response;
@@ -66,22 +103,27 @@ function server({
       return json({ categories, serverNow: NOW });
     }
     if (input === "/api/session") {
-      return json({ session, serverNow: NOW });
+      return timer({ session });
     }
     if (input === "/api/session/start") {
       started(body);
-      return onStart ? onStart(body) : json({ session: workSession(), serverNow: NOW });
+      return onStart ? onStart(body) : timer({ session: workSession() });
     }
     if (input.endsWith("/cancel")) {
       cancelled();
-      return onCancel ? onCancel() : json({ session: null, serverNow: NOW });
+      return onCancel ? onCancel() : timer({ session: null });
     }
     if (input.endsWith("/confirm")) {
       confirmed();
-      return onConfirm ? onConfirm() : json({ session: null, serverNow: NOW });
+      return onConfirm ? onConfirm() : timer({ session: null });
     }
     throw new Error(`unstubbed request: ${input}`);
   });
+
+  // Every answer about the timer carries the session and the cycle together,
+  // exactly as the server sends them.
+  const timer = ({ session }: { session: Session | null }) =>
+    json({ session, cycle, serverNow: NOW });
 
   vi.stubGlobal("fetch", fetched);
   return { started, cancelled, confirmed };
@@ -92,6 +134,10 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+
+/** A whole timer payload, for the handlers a test overrides itself. */
+const timerJson = (session: Session | null, cycle: Cycle = { count: 0, perCycle: 4 }) =>
+  json({ session, cycle, serverNow: NOW });
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -352,20 +398,25 @@ describe("the bell", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
-  it("ends on a deliberate tap, and nothing advances on its own", async () => {
-    const { confirmed } = server({ session: ringing(1000) });
+  it("ends on a deliberate tap, and hands over the break in the same one", async () => {
+    const rest = breakSession({ startedAt: NOW - 1000, endsAt: NOW - 1000 + SHORT_BREAK });
+    const { confirmed } = server({
+      session: ringing(1000),
+      onConfirm: () => timerJson(rest),
+    });
     renderTimer();
     const user = userEvent.setup();
 
     await user.click(
-      await screen.findByRole("button", { name: copy.timer.confirmWorkNoBreak }),
+      await screen.findByRole("button", { name: copy.timer.confirmWork }),
     );
 
     await waitFor(() => expect(confirmed).toHaveBeenCalled());
-    // Back to the start screen: acknowledging starts nothing.
+    // One tap: the pomodoro is acknowledged and the rest it earned is running.
     expect(
-      await screen.findByRole("button", { name: copy.timer.start }),
+      await screen.findByRole("button", { name: copy.timer.skipBreak }),
     ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: copy.timer.start })).toBeNull();
   });
 
   it("keeps ringing when a confirmation is refused, and says why", async () => {
@@ -377,7 +428,7 @@ describe("the bell", () => {
     const user = userEvent.setup();
 
     await user.click(
-      await screen.findByRole("button", { name: copy.timer.confirmWorkNoBreak }),
+      await screen.findByRole("button", { name: copy.timer.confirmWork }),
     );
 
     expect(await screen.findByText(copy.errors.nothingRinging)).toBeTruthy();
@@ -393,6 +444,261 @@ describe("the bell", () => {
 
     expect(await screen.findByText(copy.timer.ringWorkTitle)).toBeTruthy();
     expect(screen.getByText(faElapsed(3 * 60 * 60_000))).toBeTruthy();
+  });
+});
+
+describe("the button on a ringing pomodoro", () => {
+  /** A pomodoro whose bell went `ago` ago, owing a five-minute break. */
+  const rang = (ago: number) =>
+    workSession({ startedAt: NOW - 25 * 60_000 - ago, endsAt: NOW - ago });
+
+  it("promises the chill while there is still some of it left", async () => {
+    server({ session: rang(SHORT_BREAK - 1000) });
+    renderTimer();
+
+    expect(
+      await screen.findByRole("button", { name: copy.timer.confirmWork }),
+    ).toBeTruthy();
+  });
+
+  it("says so instead once the ring has eaten the whole break", async () => {
+    // Anchored at the nominal end: five minutes of ringing is five minutes of
+    // break spent, so this tap buys silence and nothing else. The label has to
+    // say that a moment *before* it is pressed, not after.
+    server({ session: rang(SHORT_BREAK) });
+    renderTimer();
+
+    expect(
+      await screen.findByRole("button", { name: copy.timer.confirmWorkNoBreak }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: copy.timer.confirmWork }),
+    ).toBeNull();
+  });
+
+  it("drops back to the start screen when nothing survived", async () => {
+    const { confirmed } = server({ session: rang(2 * 60 * 60_000) });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.confirmWorkNoBreak }),
+    );
+
+    await waitFor(() => expect(confirmed).toHaveBeenCalled());
+    expect(
+      await screen.findByRole("button", { name: copy.timer.start }),
+    ).toBeTruthy();
+  });
+});
+
+describe("a running break", () => {
+  it("counts down what survived the ring, and offers a skip", async () => {
+    // Two minutes of it were spent ringing, so three are left — the client is
+    // told nothing about that; it reads one end time like any other.
+    server({
+      session: breakSession({
+        startedAt: NOW - 2 * 60_000,
+        endsAt: NOW + 3 * 60_000,
+      }),
+    });
+    renderTimer();
+
+    expect(await screen.findByText(copy.timer.kindShortBreak)).toBeTruthy();
+    expect(screen.getByText(faClock(3 * 60_000))).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: copy.timer.skipBreak }),
+    ).toBeTruthy();
+    // A break belongs to no task, so it never shows one.
+    expect(screen.queryByText(CATEGORY.name)).toBeNull();
+  });
+
+  it("shows the ring time as already spent", async () => {
+    // The bar is measured from the break's start, which is the pomodoro's
+    // nominal end — so two minutes of ringing are already behind it when it
+    // first appears, rather than being quietly forgiven.
+    server({
+      session: breakSession({
+        startedAt: NOW - 2 * 60_000,
+        endsAt: NOW + 3 * 60_000,
+      }),
+    });
+    renderTimer();
+
+    const bar = await screen.findByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBe("40");
+  });
+
+  it("names the long one as the long one", async () => {
+    server({ session: breakSession({ kind: "longBreak" }) });
+    renderTimer();
+
+    expect(await screen.findByText(copy.timer.kindLongBreak)).toBeTruthy();
+  });
+
+  it("skips back to the start screen", async () => {
+    const { cancelled } = server({ session: breakSession() });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.skipBreak }),
+    );
+
+    await waitFor(() => expect(cancelled).toHaveBeenCalled());
+    expect(
+      await screen.findByRole("button", { name: copy.timer.start }),
+    ).toBeTruthy();
+  });
+});
+
+describe("a ringing break", () => {
+  const rang = (over: Partial<Session> = {}) =>
+    breakSession({ startedAt: NOW - SHORT_BREAK, endsAt: NOW, ...over });
+
+  it("asks the technique's own question: another one, or stop", async () => {
+    server({ session: rang() });
+    renderTimer();
+
+    expect(await screen.findByText(copy.timer.ringBreakTitle)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: copy.timer.continueWork }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: copy.timer.confirmBreak }),
+    ).toBeTruthy();
+  });
+
+  it("continues on the same task at the same length", async () => {
+    // Neither comes from this device: the break carries the task and the
+    // length of the pomodoro it followed, so a second device that has picked
+    // nothing continues onto the same work rather than onto its own guess.
+    localStorage.setItem("pomodorus.minutes", JSON.stringify(15));
+    const { started, confirmed } = server({
+      session: rang({ resumeDurationMs: 30 * 60_000 }),
+    });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.continueWork }),
+    );
+
+    // Acknowledged first, then started: one live session at a time.
+    await waitFor(() => expect(started).toHaveBeenCalled());
+    expect(confirmed).toHaveBeenCalled();
+    const body = started.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.categoryId).toBe(CATEGORY.id);
+    expect(body.durationMs).toBe(30 * 60_000);
+    // And the stepper behind it now agrees with what is running.
+    expect(JSON.parse(localStorage.getItem("pomodorus.minutes") ?? "0")).toBe(30);
+  });
+
+  it("falls back to this device's picks when the break carries none", async () => {
+    localStorage.setItem("pomodorus.category", JSON.stringify(CATEGORY.id));
+    localStorage.setItem("pomodorus.minutes", JSON.stringify(20));
+    const { started } = server({
+      session: rang({ resumeCategoryId: null, resumeDurationMs: null }),
+    });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.continueWork }),
+    );
+
+    await waitFor(() => expect(started).toHaveBeenCalled());
+    const body = started.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.categoryId).toBe(CATEGORY.id);
+    expect(body.durationMs).toBe(20 * 60_000);
+  });
+
+  it("cannot continue onto a task that is gone", async () => {
+    // The task the pomodoro was on has since been deleted, and this device has
+    // nothing remembered to fall back to. The list is the truth.
+    server({ session: rang({ resumeCategoryId: "gone" }) });
+    renderTimer();
+
+    const button = await screen.findByRole("button", {
+      name: copy.timer.continueWork,
+    });
+    expect(button.getAttribute("disabled")).not.toBeNull();
+  });
+
+  it("says why a continue never became a pomodoro", async () => {
+    // The break was acknowledged, so this screen is already gone by the time
+    // the start fails. The reason has to survive that, or the tap looks like
+    // it did nothing.
+    server({
+      session: rang(),
+      onStart: () => json({ error: "category_not_found", serverNow: NOW }, 404),
+    });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.continueWork }),
+    );
+
+    expect(await screen.findByText(copy.errors.categoryNotFound)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: copy.timer.start }),
+    ).toBeTruthy();
+  });
+
+  it("stops, with both still picked", async () => {
+    localStorage.setItem("pomodorus.category", JSON.stringify(CATEGORY.id));
+    const { started, confirmed } = server({ session: rang() });
+    renderTimer();
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByRole("button", { name: copy.timer.confirmBreak }),
+    );
+
+    await waitFor(() => expect(confirmed).toHaveBeenCalled());
+    expect(started).not.toHaveBeenCalled();
+    // Back where it started, ready to go again on the same task.
+    const start = await screen.findByRole("button", { name: copy.timer.start });
+    expect(start.getAttribute("disabled")).toBeNull();
+  });
+});
+
+describe("the cycle dots", () => {
+  it("show how far into the cycle a running session is", async () => {
+    server({ session: workSession(), cycle: { count: 2, perCycle: 4 } });
+    renderTimer();
+
+    const dots = await screen.findByTitle(
+      t(copy.timer.cycleTitle, { n: faDigits(2), total: faDigits(4) }),
+    );
+    expect(dots.childElementCount).toBe(4);
+    const filled = [...dots.children].filter((dot) =>
+      dot.className.includes("bg-foreground"),
+    );
+    expect(filled.length).toBe(2);
+  });
+
+  it("clamp rather than grow for somebody who keeps declining the long break", async () => {
+    server({ session: workSession(), cycle: { count: 6, perCycle: 4 } });
+    renderTimer();
+
+    const dots = await screen.findByTitle(
+      t(copy.timer.cycleTitle, { n: faDigits(4), total: faDigits(4) }),
+    );
+    expect(dots.childElementCount).toBe(4);
+  });
+
+  it("are not on the start screen, where there is no session to be in one", async () => {
+    server({ cycle: { count: 2, perCycle: 4 } });
+    renderTimer();
+
+    await screen.findByRole("button", { name: copy.timer.start });
+    expect(
+      screen.queryByTitle(
+        t(copy.timer.cycleTitle, { n: faDigits(2), total: faDigits(4) }),
+      ),
+    ).toBeNull();
   });
 });
 

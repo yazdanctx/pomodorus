@@ -48,12 +48,13 @@ func TestConfirmingAtTheBellEndsTheSession(t *testing.T) {
 	h.Clock.Advance(25 * time.Minute)
 	body := payload(t, client.POST("/api/session/"+live.ID+"/confirm", nil))
 
-	// Nothing advances on its own — acknowledging leaves the timer idle.
-	if body.Session != nil {
-		t.Errorf("confirming started something: %+v", body.Session)
+	// The pomodoro is over and the break it earned has begun — one tap, not
+	// two. Nothing else advanced on its own: the break stops at its own bell.
+	if body.Session == nil || body.Session.Kind != "shortBreak" {
+		t.Fatalf("confirming did not start the break: %+v", body.Session)
 	}
-	if got := liveSession(t, client); got.Session != nil {
-		t.Errorf("the confirmed session is still live: %+v", got.Session)
+	if got := liveSession(t, client); got.Session == nil || got.Session.ID != body.Session.ID {
+		t.Errorf("the break is not the live session: %+v", got.Session)
 	}
 
 	_, _, confirmedAt := stored(t, h, live.ID)
@@ -105,24 +106,37 @@ func TestARingIsNotCancellable(t *testing.T) {
 	}
 }
 
-func TestConfirmingTwiceIsRefused(t *testing.T) {
+func TestConfirmingTwiceChangesNothing(t *testing.T) {
 	h := apitest.New(t)
 	client, category := working(t, h)
 	live := payload(t, start(client, category, pomodoro)).Session
 	h.Clock.Advance(25 * time.Minute)
 
-	client.POST("/api/session/"+live.ID+"/confirm", nil).ExpectStatus(http.StatusOK)
+	rest := confirm(t, client, live.ID).Session
 	first := apitest.Origin.Add(25 * time.Minute)
 
-	// A second tap — a double click, or the other device catching up — must
-	// not move the acknowledgement.
+	// A second tap — a double click, the other device catching up, or a retry
+	// of a request whose answer was lost on the way back — acknowledges
+	// nothing a second time and starts no second break. It says what the timer
+	// is, which is the break the first tap started.
 	h.Clock.Advance(time.Minute)
-	client.POST("/api/session/"+live.ID+"/confirm", nil).
-		ExpectError(http.StatusConflict, "nothing_ringing")
+	again := confirm(t, client, live.ID).Session
+	if again == nil || again.ID != rest.ID {
+		t.Errorf("the second tap did not land on the same break: %+v", again)
+	}
 
 	_, _, confirmedAt := stored(t, h, live.ID)
 	if !confirmedAt.Equal(first) {
 		t.Errorf("confirmed_at moved to %v, want %v", confirmedAt, first)
+	}
+
+	var breaks int
+	if err := h.DB.QueryRow(t.Context(),
+		`SELECT count(*) FROM sessions WHERE kind <> 'work'`).Scan(&breaks); err != nil {
+		t.Fatal(err)
+	}
+	if breaks != 1 {
+		t.Errorf("%d breaks exist, want the one", breaks)
 	}
 }
 
@@ -167,7 +181,9 @@ func TestARingIsAcknowledgedFromWhicheverDeviceIsAtHand(t *testing.T) {
 	other.CopyCookiesFrom(client)
 	other.POST("/api/session/"+live.ID+"/confirm", nil).ExpectStatus(http.StatusOK)
 
-	if got := liveSession(t, client); got.Session != nil {
+	// And the device that was not touched is on the break, because it asks the
+	// same question of the same server and gets the same answer.
+	if got := liveSession(t, client); got.Session == nil || got.Session.Kind != "shortBreak" {
 		t.Errorf("the first device still shows the ring: %+v", got.Session)
 	}
 }

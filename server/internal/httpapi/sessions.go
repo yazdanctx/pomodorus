@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -32,19 +33,59 @@ type session struct {
 	// The nominal length, which is what gets credited. Under fast sessions it
 	// is not endsAt - startedAt, and nothing may assume it is.
 	DurationMs int64 `json:"durationMs"`
+
+	// When the rest this pomodoro owes runs out. Null on a break, which owes
+	// nothing.
+	//
+	// It is an absolute instant rather than a length for the same reason
+	// everything else here is: the break is anchored at the nominal end, so
+	// ring time is spent out of it, and a client that has this one number can
+	// say — live, without asking again — whether confirming now still buys a
+	// break or drops straight back to the start screen. Which of the two
+	// breaks it would be is not sent, because nothing on screen says: the
+	// button offers a chill, and the break itself arrives named.
+	//
+	// Under fast sessions the break that actually starts is shorter than this,
+	// exactly as a session's `endsAt` is not `startedAt + durationMs`. It is
+	// the deadline, not a promise about the length.
+	BreakEndsAt *int64 `json:"breakEndsAt"`
+
+	// What "another one" resumes, on a ringing break: the task the pomodoro
+	// before it was on, and the length it ran for. Null on a pomodoro.
+	//
+	// Read off that pomodoro rather than left to the device, because the timer
+	// belongs to the person: a second device that opens into a ringing break
+	// has never picked anything, and would otherwise either refuse to continue
+	// or continue onto whatever it last remembered — a different task.
+	ResumeCategoryID *string `json:"resumeCategoryId"`
+	ResumeDurationMs *int64  `json:"resumeDurationMs"`
 }
 
-// sessionResponse always carries the field, null when there is no live
+// cycleState is how far into the cycle the user is. Derived from the sessions
+// themselves on every read, never stored, so two devices cannot disagree about
+// it and a restart cannot lose it.
+type cycleState struct {
+	Count    int `json:"count"`
+	PerCycle int `json:"perCycle"`
+}
+
+// sessionResponse always carries the session field, null when there is no live
 // session, so the client never has to tell "no timer" from "not asked yet".
 type sessionResponse struct {
-	Session   *session `json:"session"`
-	ServerNow int64    `json:"serverNow"`
+	Session   *session   `json:"session"`
+	Cycle     cycleState `json:"cycle"`
+	ServerNow int64      `json:"serverNow"`
 }
+
+// cycleWindow is how far back the cycle counter looks. An hour of idleness
+// ends a cycle and a long break ends a cycle, so no cycle can reach back
+// further than a handful of hours; a day is many times over enough.
+const cycleWindow = 24 * time.Hour
 
 func asSession(row db.Session, categoryName *string) session {
 	out := session{
 		ID:           uuid.UUID(row.ID.Bytes).String(),
-		Kind:         kindToJSON(row.Kind),
+		Kind:         string(kindOf(row.Kind)),
 		CategoryName: categoryName,
 		StartedAt:    row.StartedAt.Time.UnixMilli(),
 		EndsAt:       row.EndsAt.Time.UnixMilli(),
@@ -57,25 +98,132 @@ func asSession(row db.Session, categoryName *string) session {
 	return out
 }
 
-// The wire spells kinds the way the client does; the database spells them the
-// way SQL does.
-func kindToJSON(kind db.SessionKind) string {
+// The domain and the wire spell kinds the same way; the database spells them
+// the way SQL does.
+func kindOf(kind db.SessionKind) timer.Kind {
 	switch kind {
 	case db.SessionKindShortBreak:
-		return "shortBreak"
+		return timer.ShortBreak
 	case db.SessionKindLongBreak:
-		return "longBreak"
+		return timer.LongBreak
 	default:
-		return "work"
+		return timer.Work
 	}
+}
+
+func storedKind(kind timer.Kind) db.SessionKind {
+	switch kind {
+	case timer.ShortBreak:
+		return db.SessionKindShortBreak
+	case timer.LongBreak:
+		return db.SessionKindLongBreak
+	default:
+		return db.SessionKindWork
+	}
+}
+
+// cycleCount walks the recent past into the number of pomodoros completed in
+// the cycle that is current at `now`. The rule itself is in the timer package,
+// with nothing but rows and an instant crossing into it.
+func (s *Server) cycleCount(ctx context.Context, q *db.Queries, userID pgtype.UUID, now time.Time) (int, error) {
+	rows, err := q.SessionsSince(ctx, db.SessionsSinceParams{
+		UserID: userID, StartedAt: pgTime(now.Add(-cycleWindow)),
+	})
+	if err != nil {
+		return 0, err
+	}
+	past := make([]timer.Session, 0, len(rows))
+	for _, row := range rows {
+		past = append(past, timer.Session{
+			Kind:        kindOf(row.Kind),
+			StartedAt:   row.StartedAt.Time,
+			EndsAt:      row.EndsAt.Time,
+			CancelledAt: row.CancelledAt.Time,
+		})
+	}
+	return timer.Cycle(past, now), nil
+}
+
+// timerState is the whole answer to "what is my timer doing": the one live
+// session if there is one, and the cycle it sits in.
+//
+// Both are reads. Nothing here decides anything — the session's state, the
+// break it owes and the cycle it belongs to are all computed from stored rows
+// plus this instant, which is what lets the same answer be given to every
+// device without anything being pushed.
+//
+// It takes its queries rather than reaching for the server's, so the handler
+// that confirms a bell can ask it from inside the transaction that started
+// the break and see its own write.
+func (s *Server) timerState(ctx context.Context, q *db.Queries, userID pgtype.UUID, now time.Time) (sessionResponse, error) {
+	state := sessionResponse{
+		Cycle:     cycleState{PerCycle: timer.DefaultPerCycle},
+		ServerNow: now.UnixMilli(),
+	}
+
+	count, err := s.cycleCount(ctx, q, userID, now)
+	if err != nil {
+		return state, err
+	}
+	state.Cycle.Count = count
+
+	live, err := q.LiveSessionForUser(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return state, nil
+	}
+	if err != nil {
+		return state, err
+	}
+
+	// A private task's name is nobody else's business, but this is the owner's
+	// own timer — they see what they wrote.
+	out := asSession(live.Session, live.CategoryName)
+	if kindOf(live.Session.Kind) == timer.Work {
+		// A pomodoro that is still running has not been counted yet but is
+		// about to be, and the break it will owe is the one for the cycle it
+		// is going to close. One that is ringing was credited at its bell and
+		// is already in the count.
+		completed := state.Cycle.Count
+		if live.Session.EndsAt.Time.After(now) {
+			completed++
+		}
+		_, length := timer.BreakAfter(completed)
+		ends := timer.BreakDeadline(live.Session.EndsAt.Time, length).UnixMilli()
+		out.BreakEndsAt = &ends
+	} else if err := s.resumeHint(ctx, q, userID, live.Session, &out); err != nil {
+		return state, err
+	}
+	state.Session = &out
+	return state, nil
+}
+
+// resumeHint fills in what "another one" would resume from a break: the task
+// and the length of the pomodoro that break was handed over from.
+//
+// A break that cannot find its pomodoro — one whose bell was rung by a build
+// that anchored differently, or by hand — simply carries no hint, and the
+// client falls back to whatever this device last picked.
+func (s *Server) resumeHint(ctx context.Context, q *db.Queries, userID pgtype.UUID, rest db.Session, out *session) error {
+	work, err := q.WorkBeforeBreak(ctx, db.WorkBeforeBreakParams{
+		UserID: userID, EndsAt: rest.StartedAt,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if work.CategoryID.Valid {
+		id := uuid.UUID(work.CategoryID.Bytes).String()
+		out.ResumeCategoryID = &id
+	}
+	out.ResumeDurationMs = &work.DurationMs
+	return nil
 }
 
 // liveSession reads the one session that has not been acknowledged or
 // abandoned, or nil when there is none.
-func (s *Server) liveSession(r *http.Request, userID pgtype.UUID) (*session, error) {
-	ctx, cancel := timeout(r, 5*time.Second)
-	defer cancel()
-
+func (s *Server) liveSession(ctx context.Context, userID pgtype.UUID) (*session, error) {
 	row, err := s.q.LiveSessionForUser(ctx, userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -83,9 +231,6 @@ func (s *Server) liveSession(r *http.Request, userID pgtype.UUID) (*session, err
 	if err != nil {
 		return nil, err
 	}
-
-	// A private task's name is nobody else's business, but this is the owner's
-	// own timer — they see what they wrote.
 	live := asSession(row.Session, row.CategoryName)
 	return &live, nil
 }
@@ -97,13 +242,10 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	live, err := s.liveSession(r, user.ID)
-	if err != nil {
-		s.log.Error("read session", "error", err)
-		s.writeError(w, http.StatusInternalServerError, "server_error")
-		return
-	}
-	writeJSON(w, http.StatusOK, sessionResponse{Session: live, ServerNow: s.now().UnixMilli()})
+	ctx, cancel := timeout(r, 5*time.Second)
+	defer cancel()
+
+	s.writeTimerState(ctx, w, user.ID, s.now())
 }
 
 type startSessionRequest struct {
@@ -143,22 +285,22 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 
 	now := s.now()
 
+	ctx, cancel := timeout(r, 5*time.Second)
+	defer cancel()
+
 	// Asking to start while one is live returns the live one rather than
 	// erroring. That is what lets a second device open into the running timer
 	// instead of offering a start button, and what makes a retried start safe.
-	live, err := s.liveSession(r, user.ID)
+	live, err := s.liveSession(ctx, user.ID)
 	if err != nil {
 		s.log.Error("read session", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "server_error")
 		return
 	}
 	if live != nil {
-		writeJSON(w, http.StatusOK, sessionResponse{Session: live, ServerNow: now.UnixMilli()})
+		s.writeTimerState(ctx, w, user.ID, now)
 		return
 	}
-
-	ctx, cancel := timeout(r, 5*time.Second)
-	defer cancel()
 
 	category, err := s.q.CategoryByID(ctx, db.CategoryByIDParams{ID: pgID(categoryID), UserID: user.ID})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && category.DeletedAt.Valid) {
@@ -193,8 +335,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	started := asSession(row, &category.Name)
-	writeJSON(w, http.StatusOK, sessionResponse{Session: &started, ServerNow: now.UnixMilli()})
+	s.writeTimerState(ctx, w, user.ID, now)
 }
 
 func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
@@ -214,6 +355,12 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	now := s.now()
+	// One endpoint for two gestures that are the same fact: abandoning a
+	// pomodoro, and skipping a break. Both say "this session is over and it
+	// was not seen through", and the only difference — that skipping the long
+	// break still closes the cycle — is read back out of the row afterwards
+	// rather than decided here.
+	//
 	// Refused once the bell has gone: the work was credited at its nominal
 	// end, and credited work cannot be retracted. The database decides that
 	// rather than a read-then-write, so the race at the boundary has one
@@ -233,15 +380,30 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 
 	// Answering with the state afterwards rather than with nothing: the caller
 	// asked to change the timer and wants to know what the timer now is.
-	writeJSON(w, http.StatusOK, sessionResponse{Session: nil, ServerNow: now.UnixMilli()})
+	s.writeTimerState(ctx, w, user.ID, now)
 }
 
-// confirmSession acknowledges the bell.
+// confirmSession acknowledges the bell, and starts whatever break survived it.
+//
+// It is idempotent on the session it names: tapping twice, or retrying a
+// request whose answer was lost, acknowledges nothing a second time and starts
+// no second break — it just says what the timer is.
 //
 // It is the one deliberate tap that ends a ring, and the only write a ringing
 // session ever takes. Nothing else about the row moves: the work was credited
 // at its exact nominal end, so a confirmation two hours late records what a
 // confirmation two seconds late records.
+//
+// What a late confirmation does change is the rest. The break is anchored at
+// the pomodoro's nominal end rather than at this tap, so every second of
+// ringing is a second of break already spent — and once the whole break has
+// gone by there is nothing left to start, so acknowledging drops straight back
+// to an idle timer. That is not a punishment: time away from the desk was rest
+// whether or not it was labelled as such.
+//
+// Confirming a break starts nothing. Whether to go round again is the
+// technique's own fork, and the client asks it as two buttons rather than
+// having it answered here.
 func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.currentUser(r)
 	if !ok {
@@ -259,11 +421,26 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	now := s.now()
+
+	// The acknowledgement and the break it starts are one transaction: the
+	// partial unique index allows only one live session, so a break that
+	// existed without its pomodoro being confirmed — or a confirmation whose
+	// break never arrived — would leave the timer in a state no gesture
+	// produces.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		s.log.Error("confirm session", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
 	// Refused before the bell: a running session is not something to
 	// acknowledge, and letting it through would be a way to end a pomodoro
 	// early and still be paid for it. As with cancelling, the database decides
 	// the boundary rather than a read-then-write.
-	confirmed, err := s.q.ConfirmSession(ctx, db.ConfirmSessionParams{
+	confirmed, err := q.ConfirmSession(ctx, db.ConfirmSessionParams{
 		ID: pgID(id), UserID: user.ID, ConfirmedAt: pgTime(now),
 	})
 	if err != nil {
@@ -271,12 +448,109 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "server_error")
 		return
 	}
-	if confirmed == 0 {
+
+	row, err := q.SessionByID(ctx, db.SessionByIDParams{ID: pgID(id), UserID: user.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		s.writeError(w, http.StatusConflict, "nothing_ringing")
+		return
+	}
+	if err != nil {
+		s.log.Error("confirm session", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+
+	switch {
+	case confirmed == 1:
+		if kindOf(row.Kind) == timer.Work {
+			if err := s.startBreak(ctx, q, user.ID, row, now); err != nil {
+				s.log.Error("start break", "error", err)
+				s.writeError(w, http.StatusInternalServerError, "server_error")
+				return
+			}
+		}
+	case row.ConfirmedAt.Valid:
+		// This tap already landed — a double click, the other device catching
+		// up, or a retry of a request whose answer was lost. The bell is not
+		// rung twice and `confirmed_at` does not move; the caller is told what
+		// the timer is, which on the retry is the break its first attempt
+		// started. An idempotent POST is the whole reason a lost response is
+		// safe to send again.
+	default:
+		// Still running, or abandoned. There is no bell here to acknowledge.
 		s.writeError(w, http.StatusConflict, "nothing_ringing")
 		return
 	}
 
-	// Nothing advances on its own: acknowledging leaves the timer idle rather
-	// than starting anything.
-	writeJSON(w, http.StatusOK, sessionResponse{Session: nil, ServerNow: now.UnixMilli()})
+	state, err := s.timerState(ctx, q, user.ID, now)
+	if err != nil {
+		s.log.Error("read session", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		s.log.Error("confirm session", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+// startBreak begins the rest a just-acknowledged pomodoro owes, if any of it
+// is left.
+//
+// The row it writes says the break began at the bell, not at the tap. That one
+// choice is the whole of the ring-time rule: the countdown, the progress bar
+// and the moment the break itself rings all fall out of it, and nothing
+// downstream has to know that a ring happened at all.
+//
+// The break's id is minted here rather than by the client, because a break is
+// not something anybody asked for by name: it is a consequence of the
+// confirmation, and the transaction plus the one-live-session index are what
+// make a retried tap unable to produce a second one.
+func (s *Server) startBreak(ctx context.Context, q *db.Queries, userID pgtype.UUID, work db.Session, now time.Time) error {
+	// The pomodoro was credited at its bell, so the count already includes it:
+	// this is the cycle it closed, and the break owed is the one that cycle
+	// earned.
+	completed, err := s.cycleCount(ctx, q, userID, now)
+	if err != nil {
+		return err
+	}
+	kind, length := timer.BreakAfter(completed)
+
+	bell := work.EndsAt.Time
+	ends, left := timer.BreakEnds(bell, length, now, s.cfg.FastSessions)
+	if !left {
+		// Rung through the whole of it. There is no break to start, and the
+		// button that was just pressed said so before it was pressed.
+		return nil
+	}
+
+	_, err = q.StartSession(ctx, db.StartSessionParams{
+		ID:     pgID(uuid.New()),
+		UserID: userID,
+		Kind:   storedKind(kind),
+		// A break is a break: it belongs to no task, and the schema says so.
+		CategoryID: pgtype.UUID{},
+		StartedAt:  pgTime(bell),
+		// The nominal length, whole, exactly as a pomodoro records its own —
+		// what was actually spent resting is `ends_at` minus now, and it is
+		// nobody's job to store that.
+		DurationMs: length.Milliseconds(),
+		EndsAt:     pgTime(ends),
+	})
+	return err
+}
+
+// writeTimerState answers with what the timer is. Every read and every write
+// ends this way rather than with nothing: the caller changed the timer, and
+// the next thing it would ask is what the timer now is.
+func (s *Server) writeTimerState(ctx context.Context, w http.ResponseWriter, userID pgtype.UUID, now time.Time) {
+	state, err := s.timerState(ctx, s.q, userID, now)
+	if err != nil {
+		s.log.Error("read session", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
 }

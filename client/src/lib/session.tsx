@@ -10,9 +10,11 @@ import {
 import { get, post, type ServerTimed } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
+export type Kind = "work" | "shortBreak" | "longBreak";
+
 export type Session = {
   id: string;
-  kind: "work" | "shortBreak" | "longBreak";
+  kind: Kind;
   categoryId: string | null;
   categoryName: string | null;
   /** Absolute epoch milliseconds, always — never "seconds remaining". */
@@ -21,9 +23,43 @@ export type Session = {
   endsAt: number;
   /** The nominal length, which is what gets credited. */
   durationMs: number;
+  /**
+   * When the rest this pomodoro owes runs out. Null on a break, which owes
+   * nothing.
+   *
+   * An instant rather than a length, because the break is anchored at the
+   * nominal end: every second of ringing is a second of it already spent, so
+   * this is fixed the moment the bell goes and the answer to "is there any
+   * left?" is just the clock. It is the deadline, not a promise about how long
+   * the break will run — as with `endsAt` and `durationMs`, fast sessions make
+   * those two different things.
+   */
+  breakEndsAt: number | null;
+  /**
+   * What "another one" resumes, on a break: the task the pomodoro before it
+   * was on, and the length it ran for. Null on a pomodoro.
+   *
+   * It comes from the server rather than from this device's remembered picks,
+   * because the timer belongs to the person: a second device that opens into a
+   * ringing break has never picked anything, and continuing there has to mean
+   * the same task, not whatever that device last had selected.
+   */
+  resumeCategoryId: string | null;
+  resumeDurationMs: number | null;
 };
 
-type SessionPayload = ServerTimed & { session: Session | null };
+/**
+ * How far into the cycle you are, and how long a cycle is.
+ *
+ * The server derives it from the sessions themselves on every read, so it
+ * agrees across devices and cannot be lost.
+ */
+export type Cycle = { count: number; perCycle: number };
+
+type SessionPayload = ServerTimed & { session: Session | null; cycle: Cycle };
+
+/** Only ever shown once a payload has arrived; this is the shape, not a claim. */
+const NO_CYCLE: Cycle = { count: 0, perCycle: 4 };
 
 export type SessionValue = {
   /**
@@ -32,11 +68,30 @@ export type SessionValue = {
    * flash a start button at somebody who is mid-pomodoro.
    */
   session: Session | null | undefined;
+  cycle: Cycle;
   start: (categoryId: string, durationMs: number) => Promise<Session | null>;
+  /** Abandon a pomodoro, or skip a break: the same fact, one endpoint. */
   cancel: (id: string) => Promise<void>;
-  confirm: (id: string) => Promise<void>;
+  /** Acknowledge a bell, and receive whatever the timer became. */
+  confirm: (id: string) => Promise<Session | null>;
   reload: () => Promise<void>;
 };
+
+/** Whether a session is one of the two kinds of rest. */
+export function isBreak(session: Session): boolean {
+  return session.kind !== "work";
+}
+
+/**
+ * Whether confirming a ringing pomodoro right now still buys a break.
+ *
+ * The break was anchored at the nominal end before anybody was late, so this
+ * is the ring racing a fixed instant — and the button's label follows it
+ * second by second without asking the server again.
+ */
+export function breakSurvives(session: Session, now: number): boolean {
+  return session.breakEndsAt !== null && now < session.breakEndsAt;
+}
 
 /**
  * Whether a session's bell has gone.
@@ -81,11 +136,19 @@ export function SessionProvider({
 function useFetchedSession(disabled: boolean): SessionValue {
   const auth = useAuth();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [cycle, setCycle] = useState<Cycle>(NO_CYCLE);
+
+  // Every answer about the timer carries both, so they can never disagree:
+  // the dots and the clock are two readings of one payload.
+  const receive = useCallback((payload: SessionPayload) => {
+    setSession(payload.session);
+    setCycle(payload.cycle);
+    return payload.session;
+  }, []);
 
   const reload = useCallback(async () => {
-    const payload = await get<SessionPayload>("/api/session");
-    setSession(payload.session);
-  }, []);
+    receive(await get<SessionPayload>("/api/session"));
+  }, [receive]);
 
   // Nobody signed in has no timer to ask about, and asking would only be a
   // 401. Asking again when they sign in is what makes the answer arrive
@@ -95,6 +158,7 @@ function useFetchedSession(disabled: boolean): SessionValue {
     if (disabled) return;
     if (!signedIn) {
       setSession(null);
+      setCycle(NO_CYCLE);
       return;
     }
     void reload().catch(() => setSession(null));
@@ -104,30 +168,35 @@ function useFetchedSession(disabled: boolean): SessionValue {
     async (categoryId: string, durationMs: number) => {
       // Minted here, so a start retried on a poor connection lands on the
       // session it already began rather than beginning a second one.
-      const payload = await post<SessionPayload>("/api/session/start", {
-        id: crypto.randomUUID(),
-        categoryId,
-        durationMs,
-      });
       // Asking to start while one is live answers with the live one, so this
       // is also how a second device opens into a running timer.
-      setSession(payload.session);
-      return payload.session;
+      return receive(
+        await post<SessionPayload>("/api/session/start", {
+          id: crypto.randomUUID(),
+          categoryId,
+          durationMs,
+        }),
+      );
     },
-    [],
+    [receive],
   );
 
-  const cancel = useCallback(async (id: string) => {
-    const payload = await post<SessionPayload>(`/api/session/${id}/cancel`);
-    setSession(payload.session);
-  }, []);
+  // Abandoning a pomodoro and skipping a break are the same request: this
+  // session is over and was not seen through.
+  const cancel = useCallback(
+    async (id: string) => {
+      receive(await post<SessionPayload>(`/api/session/${id}/cancel`));
+    },
+    [receive],
+  );
 
-  // The one deliberate tap that ends a ring. Nothing advances on its own, so
-  // what comes back is an idle timer rather than the next session.
-  const confirm = useCallback(async (id: string) => {
-    const payload = await post<SessionPayload>(`/api/session/${id}/confirm`);
-    setSession(payload.session);
-  }, []);
+  // The one deliberate tap that ends a ring. A pomodoro's leaves the break it
+  // earned running; a break's leaves an idle timer, because whether to go
+  // round again is a question and not a default.
+  const confirm = useCallback(
+    async (id: string) => receive(await post<SessionPayload>(`/api/session/${id}/confirm`)),
+    [receive],
+  );
 
-  return { session, start, cancel, confirm, reload };
+  return { session, cycle, start, cancel, confirm, reload };
 }

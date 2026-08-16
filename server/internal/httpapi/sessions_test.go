@@ -20,7 +20,15 @@ type sessionPayload struct {
 		StartedAt    int64   `json:"startedAt"`
 		EndsAt       int64   `json:"endsAt"`
 		DurationMs   int64   `json:"durationMs"`
+		BreakEndsAt  *int64  `json:"breakEndsAt"`
+
+		ResumeCategoryID *string `json:"resumeCategoryId"`
+		ResumeDurationMs *int64  `json:"resumeDurationMs"`
 	} `json:"session"`
+	Cycle struct {
+		Count    int `json:"count"`
+		PerCycle int `json:"perCycle"`
+	} `json:"cycle"`
 	ServerNow int64 `json:"serverNow"`
 }
 

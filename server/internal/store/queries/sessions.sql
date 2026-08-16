@@ -39,6 +39,27 @@ WHERE id = $1 AND user_id = $2
   AND confirmed_at IS NULL AND cancelled_at IS NULL
   AND ends_at <= $3;
 
+-- name: WorkBeforeBreak :one
+-- The pomodoro a break was handed over from.
+--
+-- Found by its end rather than by a foreign key, because that is what the two
+-- rows actually share: a break is anchored at its pomodoro's nominal end, so
+-- `started_at` here *is* that bell. One live session per user is what makes it
+-- unambiguous — two uncancelled pomodoros cannot end at the same instant.
+SELECT * FROM sessions
+WHERE user_id = $1 AND kind = 'work' AND cancelled_at IS NULL AND ends_at = $2;
+
+-- name: SessionsSince :many
+-- The recent past the cycle counter is walked out of, oldest first.
+--
+-- Nothing stores the count: it is derived from these rows plus now(), like
+-- every other piece of session state. The window only has to be wider than a
+-- cycle can be — an hour of idleness ends one, and a long break every few
+-- pomodoros ends one — so a day is many times over enough.
+SELECT * FROM sessions
+WHERE user_id = $1 AND started_at >= $2
+ORDER BY started_at;
+
 -- name: HasLiveSessionForCategory :one
 -- The guard on editing a task out from under a session that is using it.
 SELECT EXISTS (

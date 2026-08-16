@@ -1,7 +1,9 @@
 # 0004 — One live session per user, and nothing advances on its own
 
-**Status:** accepted (2026-08-13). The second half is carried over from v1
-unchanged (`git show v1-nextjs:docs/adr/0004-confirmed-transitions.md`).
+**Status:** accepted (2026-08-13); extended 2026-08-16 when breaks were built
+(#16) with the two sections at the end. The "confirmed transitions" half is
+carried over from v1 unchanged
+(`git show v1-nextjs:docs/adr/0004-confirmed-transitions.md`).
 
 ## One live session
 
@@ -35,6 +37,43 @@ Kept exactly as v1 had it, because it was right:
 - Confirming work starts the surviving break in one tap. Confirming a break
   offers two: continue (straight back into the same task at the same length)
   and done.
+
+## The break is the server's to create
+
+Confirming a pomodoro and starting its break are one transaction, and the
+break's id is minted by the **server** — the one write in the app that does not
+carry a client-minted id. It is not a request anybody made: it is a consequence
+of the confirmation, and there is no second gesture to make idempotent.
+
+What makes a retry safe instead is that `confirm` is idempotent on the session
+it names. A tap that already landed — a double click, the other device catching
+up, a request whose answer was lost — re-reads the row, sees it acknowledged,
+and answers with the timer as it stands, which on the retry is the break the
+first attempt started. `confirmed_at` never moves, and the partial unique index
+means a second break cannot exist even if two taps race.
+
+The alternative — a client-minted break id in the confirm body — was rejected
+because it asks the client to name something it did not ask for, and buys
+nothing the idempotent read does not already give.
+
+For the same reason a live break carries the task and the length of the
+pomodoro it followed. "Another one" has to mean the same work on whichever
+device is at hand, and a device that opened into the ring has never picked
+anything; its own remembered picks are the fallback, not the source.
+
+## Under `FAST_SESSIONS`, only the elapse collapses
+
+Ring time is deducted from the break on the **nominal** scale even in fast
+mode: a three-second session still owes five minutes of rest, and the break
+that starts then takes three seconds rather than five minutes.
+
+The consequence is a real one and is accepted deliberately: "ring past the
+whole break and there is none left" cannot be reached in fast mode without
+ringing for five real minutes. The trade is the other way round — deducting on
+the fast scale would make the break itself unreachable, because nobody answers
+a bell within three seconds, and the flag exists precisely so that the bell,
+the ring, the break and the cycle are all reachable in a minute. The no-break
+path is covered by tests instead.
 
 Auto-advancing the chain would derive even more cleanly than this — the whole
 sequence is computable from one `started_at`. It is rejected because it credits

@@ -1,8 +1,9 @@
-import { BellRing } from "lucide-react";
+import { BellRing, Play, SkipForward } from "lucide-react";
 import { useState } from "react";
 
 import { CategoryPicker } from "@/components/category-picker";
 import { Failure } from "@/components/failure";
+import { CycleDots } from "@/components/timer/cycle-dots";
 import { ProgressBar } from "@/components/timer/progress-bar";
 import {
   DEFAULT_MINUTES,
@@ -17,52 +18,66 @@ import { copy } from "@/lib/copy";
 import { faClock, faElapsed } from "@/lib/format";
 import { usePersisted } from "@/lib/persisted";
 import { useTick } from "@/lib/server-clock";
-import { isRinging, useSession, type Session } from "@/lib/session";
+import {
+  breakSurvives,
+  isBreak,
+  isRinging,
+  useSession,
+  type Cycle,
+  type Session,
+} from "@/lib/session";
 import { unlockAudio } from "@/lib/sound";
 
 const isNullableString = (value: unknown): value is string | null =>
   value === null || typeof value === "string";
 
 /**
+ * A user gesture is the only moment a browser will unlock audio or show the
+ * permission prompt, and both are for a bell that is still 25 minutes away.
+ * Asked for whenever something is started, or the ring arrives in silence.
+ */
+function primeAlerts() {
+  unlockAudio();
+  if ("Notification" in window && Notification.permission === "default") {
+    void Notification.requestPermission();
+  }
+}
+
+/** What to call a session: the task it is on, or the kind of rest it is. */
+function sessionLabel(session: Session): string {
+  switch (session.kind) {
+    case "shortBreak":
+      return copy.timer.kindShortBreak;
+    case "longBreak":
+      return copy.timer.kindLongBreak;
+    default:
+      return session.categoryName ?? copy.timer.privateTask;
+  }
+}
+
+/**
  * The timer.
  *
- * The screen it shows is derived from one question — is there a live session?
- * — and never from anything this component remembers. That is what makes a
- * second device open into the running timer rather than offering a start
- * button, and what makes the answer the same on both.
+ * The screen it shows is derived from one question — is there a live session,
+ * and has its bell gone? — and never from anything this component remembers.
+ * That is what makes a second device open into the running timer rather than
+ * offering a start button, and what makes the answer the same on both.
+ *
+ * The picked task and the picked length live here rather than on the start
+ * screen, because the ring screen needs them too: "another one" means the same
+ * task at the same length, and it is offered from the far side of a break —
+ * where the break itself is the better authority on what that was, and this
+ * device's picks are only the fallback.
  *
  * The page inset is `p-4 sm:p-6` rather than the standard `p-6`: the
  * −/clock/+ row is what sets the horizontal budget on a phone.
  */
 export function TimerRoute() {
-  const { session, start, cancel, confirm } = useSession();
-  // The three screens are one question asked of the clock, not three states
-  // anything stores: before its end a session is running, after its end and
+  const { session, cycle, start, cancel, confirm } = useSession();
+  // The screens are one question asked of the clock, not states anything
+  // stores: before its end a session is running, after its end and
   // unacknowledged it is ringing.
   const now = useTick();
-
-  return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-6 p-4 sm:p-6">
-      {session === undefined ? (
-        // Reserved rather than guessed: flashing a start button at somebody
-        // who is mid-pomodoro is the shift this exists to prevent.
-        <Skeleton className="h-64 w-full" />
-      ) : session === null ? (
-        <StartScreen onStart={start} />
-      ) : isRinging(session, now) ? (
-        <Ringing session={session} now={now} onConfirm={confirm} />
-      ) : (
-        <Running session={session} now={now} onCancel={cancel} />
-      )}
-    </main>
-  );
-}
-
-function StartScreen({
-  onStart,
-}: {
-  onStart: (categoryId: string, durationMs: number) => Promise<Session | null>;
-}) {
   const { categories, create, update, remove } = useCategories();
 
   // Which task and which length were last chosen is a per-device preference
@@ -78,29 +93,105 @@ function StartScreen({
     isWorkMinutes,
   );
 
+  // A task that has been deleted since it was picked is not a task to start
+  // on, and the server would refuse it. The list is the truth; a remembered
+  // id — this device's, or the one a break came back with — is only a claim.
+  const known = (id: string | null) =>
+    id !== null && categories?.some((c) => c.id === id) ? id : null;
+  const picked = known(selected);
+
+  // A continue that fails has nowhere to report: acknowledging the break
+  // already dropped this screen for the start screen. The reason is carried
+  // across rather than swallowed, because a button that appears to do nothing
+  // is the thing this app keeps promising not to be.
+  const [handover, setHandover] = useState<string | null>(null);
+
+  /** Begin a pomodoro on a task, at a length. Throws. */
+  async function beginWork(categoryId: string | null, durationMs: number) {
+    if (categoryId === null) return;
+    setHandover(null);
+    primeAlerts();
+    // Left where the timer now is, so the start screen behind this agrees with
+    // what is running — including on a device that picked neither.
+    setSelected(categoryId);
+    setMinutes(durationMs / 60_000);
+    await start(categoryId, durationMs);
+  }
+
+  /** What "another one" means from this break, and whether it is offered. */
+  const resume = (rest: Session) => ({
+    categoryId: known(rest.resumeCategoryId) ?? picked,
+    durationMs: rest.resumeDurationMs ?? minutes * 60_000,
+  });
+
+  return (
+    <main className="flex flex-1 flex-col items-center justify-center gap-6 p-4 sm:p-6">
+      {session === undefined ? (
+        // Reserved rather than guessed: flashing a start button at somebody
+        // who is mid-pomodoro is the shift this exists to prevent.
+        <Skeleton className="h-64 w-full" />
+      ) : session === null ? (
+        <StartScreen
+          categories={categories}
+          picked={picked}
+          onSelect={setSelected}
+          actions={{ create, update, remove }}
+          minutes={minutes}
+          onMinutes={setMinutes}
+          notice={handover}
+          onStart={() => beginWork(picked, minutes * 60_000)}
+        />
+      ) : isRinging(session, now) ? (
+        <Ringing
+          session={session}
+          cycle={cycle}
+          now={now}
+          canContinue={resume(session).categoryId !== null}
+          onConfirm={confirm}
+          onContinue={async () => {
+            const { categoryId, durationMs } = resume(session);
+            try {
+              await beginWork(categoryId, durationMs);
+            } catch (failure) {
+              setHandover(messageFor(failure));
+            }
+          }}
+        />
+      ) : (
+        <Running session={session} cycle={cycle} now={now} onEnd={cancel} />
+      )}
+    </main>
+  );
+}
+
+function StartScreen({
+  categories,
+  picked,
+  onSelect,
+  actions,
+  minutes,
+  onMinutes,
+  notice,
+  onStart,
+}: {
+  categories: ReturnType<typeof useCategories>["categories"];
+  picked: string | null;
+  onSelect: (id: string | null) => void;
+  actions: Pick<ReturnType<typeof useCategories>, "create" | "update" | "remove">;
+  minutes: number;
+  onMinutes: (minutes: number) => void;
+  /** Why the last "another one" never became a pomodoro, if it didn't. */
+  notice: string | null;
+  onStart: () => Promise<void>;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // A task that has been deleted since it was picked is not a task to start
-  // on, and the server would refuse it.
-  const picked =
-    selected !== null && categories?.some((c) => c.id === selected)
-      ? selected
-      : null;
-
   async function begin() {
-    if (picked === null) return;
-    // A user gesture is the only moment a browser will unlock audio or show
-    // the permission prompt, and both are for a bell that is still 25 minutes
-    // away. Asked for here or the ring is silent when it arrives.
-    unlockAudio();
-    if ("Notification" in window && Notification.permission === "default") {
-      void Notification.requestPermission();
-    }
     setError(null);
     setPending(true);
     try {
-      await onStart(picked, minutes * 60_000);
+      await onStart();
     } catch (failure) {
       setError(messageFor(failure));
       setPending(false);
@@ -115,17 +206,17 @@ function StartScreen({
         <CategoryPicker
           categories={categories}
           selected={picked}
-          onSelect={setSelected}
-          actions={{ create, update, remove }}
+          onSelect={onSelect}
+          actions={actions}
         />
       )}
 
       {/* border-t-0 because the picker above supplies that edge. px-3 on
           phones is what the −/clock/+ row imposes, not a type decision. */}
       <div className="flex w-full min-w-0 flex-col items-center gap-6 border border-t-0 px-3 py-12 sm:px-10 sm:py-20">
-        <Stepper minutes={minutes} onChange={setMinutes} />
+        <Stepper minutes={minutes} onChange={onMinutes} />
 
-        <Failure message={error} />
+        <Failure message={error ?? notice} />
 
         <Button
           className="w-40"
@@ -139,23 +230,35 @@ function StartScreen({
   );
 }
 
+/**
+ * A session counting down: a pomodoro, or the rest that followed one.
+ *
+ * A break's countdown is shorter than its nominal length whenever the bell
+ * before it was left ringing, and its progress bar starts part-filled — both
+ * fall out of the same fact, that the break was anchored at the pomodoro's
+ * nominal end rather than at the tap that acknowledged it. Nothing here has to
+ * know a ring happened.
+ */
 function Running({
   session,
+  cycle,
   now,
-  onCancel,
+  onEnd,
 }: {
   session: Session;
+  cycle: Cycle;
   now: number;
-  onCancel: (id: string) => Promise<void>;
+  onEnd: (id: string) => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
 
   const remaining = Math.max(0, session.endsAt - now);
+  const resting = isBreak(session);
 
   async function abandon() {
     setError(null);
     try {
-      await onCancel(session.id);
+      await onEnd(session.id);
     } catch (failure) {
       setError(messageFor(failure));
     }
@@ -164,7 +267,7 @@ function Running({
   return (
     <div className="flex w-full flex-col items-center gap-6">
       <p className="max-w-full truncate text-center text-muted-foreground">
-        {session.categoryName ?? copy.timer.privateTask}
+        {sessionLabel(session)}
       </p>
 
       {/* dir="ltr" and tabular: Persian digits in a right-to-left document
@@ -186,11 +289,25 @@ function Running({
         now={now}
       />
 
+      <CycleDots {...cycle} />
+
       <Failure message={error} />
 
-      <Button variant="outline" onClick={() => void abandon()}>
-        {copy.timer.cancelWork}
-      </Button>
+      {/* One request behind both: abandoning a pomodoro and skipping a break
+          are the same fact — this session is over and was not seen through.
+          What they mean is not the same, which is why they do not read the
+          same: giving up is quiet and outlined, going back to work early is
+          filled and carries the skip arrow. Both are in v1's screenshots. */}
+      {resting ? (
+        <Button variant="secondary" onClick={() => void abandon()}>
+          <SkipForward />
+          {copy.timer.skipBreak}
+        </Button>
+      ) : (
+        <Button variant="outline" onClick={() => void abandon()}>
+          {copy.timer.cancelWork}
+        </Button>
+      )}
     </div>
   );
 }
@@ -198,9 +315,17 @@ function Running({
 /**
  * A session that has reached its end and is waiting to be acknowledged.
  *
- * The work is already credited, at its exact nominal end and its full nominal
- * length, so nothing on this screen changes the record — which is why there is
- * deliberately no cancel here. A ringing pomodoro is complete.
+ * A pomodoro here is already credited, at its exact nominal end and its full
+ * nominal length, so nothing on this screen changes the record — which is why
+ * there is deliberately no cancel. A ringing pomodoro is complete.
+ *
+ * What the ring does spend is the break. It was anchored at the nominal end,
+ * so the time spent here comes out of it, and the button says which of the two
+ * things confirming will do *before* it is pressed: start the rest that is
+ * left, or drop back to the start screen because there is none.
+ *
+ * A ringing break asks the technique's own question instead — another one, or
+ * stop — because after a rest that genuinely is a decision, not friction.
  *
  * The clock counts *up*, and it is the one hue the app allows itself: a clock
  * that has stopped meaning "time left" has to be unmistakable from across a
@@ -208,24 +333,35 @@ function Running({
  */
 function Ringing({
   session,
+  cycle,
   now,
+  canContinue,
   onConfirm,
+  onContinue,
 }: {
   session: Session;
+  cycle: Cycle;
   now: number;
-  onConfirm: (id: string) => Promise<void>;
+  canContinue: boolean;
+  onConfirm: (id: string) => Promise<Session | null>;
+  onContinue: () => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const resting = isBreak(session);
 
-  async function acknowledge() {
+  /** Only a deliberate tap ends a ring — and this is the tap. */
+  async function acknowledge(next?: () => Promise<void>) {
     // The tap is a gesture, which is the only thing that can bring audio back
     // after a reload — and the confirmation may fail, leaving it still ringing.
+    // Audio only: a permission prompt belongs to starting something, not to
+    // silencing something.
     unlockAudio();
     setError(null);
     setPending(true);
     try {
       await onConfirm(session.id);
+      await next?.();
     } catch (failure) {
       setError(messageFor(failure));
       setPending(false);
@@ -235,13 +371,13 @@ function Ringing({
   return (
     <div className="flex w-full flex-col items-center gap-6">
       <p className="max-w-full truncate text-center text-muted-foreground">
-        {session.categoryName ?? copy.timer.privateTask}
+        {sessionLabel(session)}
       </p>
 
       <div className="flex items-center gap-2">
         <BellRing className="size-8 animate-pulse" />
         <p className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          {copy.timer.ringWorkTitle}
+          {resting ? copy.timer.ringBreakTitle : copy.timer.ringWorkTitle}
         </p>
       </div>
 
@@ -253,22 +389,48 @@ function Ringing({
         {faElapsed(now - session.endsAt)}
       </p>
 
+      <CycleDots {...cycle} />
+
       <Failure message={error} />
 
-      {/* Only a deliberate tap ends a ring. Tab focus, a resume, a mouse
-          moving and a notification being clicked all leave it alone.
-
-          The label is the no-break one: there are no breaks yet, so promising
-          a chill this tap cannot deliver would be a lie. Breaks bring the
-          other label back with the break that earns it. */}
-      <Button
-        className="w-56"
-        variant="outline"
-        disabled={pending}
-        onClick={() => void acknowledge()}
-      >
-        {copy.timer.confirmWorkNoBreak}
-      </Button>
+      {resting ? (
+        // Continue over done: going round again is the likelier answer and the
+        // one the technique is about, so it gets the weight.
+        <div className="flex w-full max-w-xs flex-col gap-2">
+          <Button
+            size="lg"
+            variant="outline"
+            disabled={pending || !canContinue}
+            onClick={() => void acknowledge(onContinue)}
+          >
+            <Play />
+            {copy.timer.continueWork}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={pending}
+            onClick={() => void acknowledge()}
+          >
+            {copy.timer.confirmBreak}
+          </Button>
+        </div>
+      ) : (
+        // Tab focus, a resume, a mouse moving and a notification being clicked
+        // all leave the ring alone. The label is the promise this tap can
+        // actually keep: once the ring has eaten the whole break there is no
+        // chill to offer, and saying otherwise would be a lie told a second
+        // before it is found out.
+        <Button
+          className="w-56"
+          variant="outline"
+          disabled={pending}
+          onClick={() => void acknowledge()}
+        >
+          {breakSurvives(session, now)
+            ? copy.timer.confirmWork
+            : copy.timer.confirmWorkNoBreak}
+        </Button>
+      )}
     </div>
   );
 }

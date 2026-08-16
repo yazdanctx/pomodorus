@@ -35,9 +35,9 @@ function Mounted({
   confirm,
 }: {
   session: Session | null;
-  confirm?: () => Promise<void>;
+  confirm?: () => Promise<null>;
 }) {
-  const value = { ...holding(session), confirm: confirm ?? (async () => {}) };
+  const value = { ...holding(session), confirm: confirm ?? (async () => null) };
   return (
     <AuthProvider value={auth}>
       <SessionProvider value={value}>
@@ -145,7 +145,7 @@ describe("the notification", () => {
 
 describe("what does not confirm a ring", () => {
   it("keeps ringing through focus, keys, pointers and a page becoming visible", () => {
-    const confirm = vi.fn(async () => {});
+    const confirm = vi.fn(async () => null);
     render(<Mounted session={ringing()} confirm={confirm} />);
 
     // The listeners the alarm does add exist to unlock audio after a reload,

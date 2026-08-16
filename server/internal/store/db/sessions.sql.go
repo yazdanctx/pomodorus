@@ -143,6 +143,53 @@ func (q *Queries) SessionByID(ctx context.Context, arg SessionByIDParams) (Sessi
 	return i, err
 }
 
+const sessionsSince = `-- name: SessionsSince :many
+SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at FROM sessions
+WHERE user_id = $1 AND started_at >= $2
+ORDER BY started_at
+`
+
+type SessionsSinceParams struct {
+	UserID    pgtype.UUID
+	StartedAt pgtype.Timestamptz
+}
+
+// The recent past the cycle counter is walked out of, oldest first.
+//
+// Nothing stores the count: it is derived from these rows plus now(), like
+// every other piece of session state. The window only has to be wider than a
+// cycle can be — an hour of idleness ends one, and a long break every few
+// pomodoros ends one — so a day is many times over enough.
+func (q *Queries) SessionsSince(ctx context.Context, arg SessionsSinceParams) ([]Session, error) {
+	rows, err := q.db.Query(ctx, sessionsSince, arg.UserID, arg.StartedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Session
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Kind,
+			&i.CategoryID,
+			&i.StartedAt,
+			&i.DurationMs,
+			&i.EndsAt,
+			&i.ConfirmedAt,
+			&i.CancelledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const startSession = `-- name: StartSession :one
 INSERT INTO sessions (id, user_id, kind, category_id, started_at, duration_ms, ends_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -173,6 +220,39 @@ func (q *Queries) StartSession(ctx context.Context, arg StartSessionParams) (Ses
 		arg.DurationMs,
 		arg.EndsAt,
 	)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Kind,
+		&i.CategoryID,
+		&i.StartedAt,
+		&i.DurationMs,
+		&i.EndsAt,
+		&i.ConfirmedAt,
+		&i.CancelledAt,
+	)
+	return i, err
+}
+
+const workBeforeBreak = `-- name: WorkBeforeBreak :one
+SELECT id, user_id, kind, category_id, started_at, duration_ms, ends_at, confirmed_at, cancelled_at FROM sessions
+WHERE user_id = $1 AND kind = 'work' AND cancelled_at IS NULL AND ends_at = $2
+`
+
+type WorkBeforeBreakParams struct {
+	UserID pgtype.UUID
+	EndsAt pgtype.Timestamptz
+}
+
+// The pomodoro a break was handed over from.
+//
+// Found by its end rather than by a foreign key, because that is what the two
+// rows actually share: a break is anchored at its pomodoro's nominal end, so
+// `started_at` here *is* that bell. One live session per user is what makes it
+// unambiguous — two uncancelled pomodoros cannot end at the same instant.
+func (q *Queries) WorkBeforeBreak(ctx context.Context, arg WorkBeforeBreakParams) (Session, error) {
+	row := q.db.QueryRow(ctx, workBeforeBreak, arg.UserID, arg.EndsAt)
 	var i Session
 	err := row.Scan(
 		&i.ID,

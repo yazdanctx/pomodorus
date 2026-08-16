@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { AuthProvider, type Auth, type AuthValue } from "@/lib/auth";
 import {
   SessionProvider,
+  type Cycle,
   type Session,
   type SessionValue,
 } from "@/lib/session";
@@ -47,12 +48,16 @@ export const SIGNED_IN: Auth = { status: "authenticated", handle: "yazdan" };
  * A session context holding exactly this session, with mutations that do
  * nothing — for the components that only read it.
  */
-export function holding(session: Session | null | undefined): SessionValue {
+export function holding(
+  session: Session | null | undefined,
+  cycle: Cycle = { count: 0, perCycle: 4 },
+): SessionValue {
   return {
     session,
+    cycle,
     start: async () => null,
     cancel: async () => {},
-    confirm: async () => {},
+    confirm: async () => null,
     reload: async () => {},
   };
 }
@@ -67,6 +72,11 @@ export function workSession(endsAt: number, over: Partial<Session> = {}): Sessio
     startedAt: endsAt - 25 * 60_000,
     endsAt,
     durationMs: 25 * 60_000,
+    // The five minutes it owes, anchored at its own end — so a ring that
+    // reaches this instant has spent the whole of it.
+    breakEndsAt: endsAt + 5 * 60_000,
+    resumeCategoryId: null,
+    resumeDurationMs: null,
     ...over,
   };
 }
