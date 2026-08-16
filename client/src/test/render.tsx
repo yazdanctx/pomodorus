@@ -3,13 +3,11 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 
 import { AuthProvider, type Auth, type AuthValue } from "@/lib/auth";
-import { CLASSIC, type Intervals } from "@/lib/intervals";
+import { CLASSIC } from "@/lib/intervals";
 import {
   SessionProvider,
-  type Cycle,
   type Session,
   type SessionValue,
-  type Today,
 } from "@/lib/session";
 
 /**
@@ -49,23 +47,29 @@ export const SIGNED_IN: Auth = { status: "authenticated", handle: "yazdan" };
 /**
  * A session context holding exactly this session, with mutations that do
  * nothing — for the components that only read it.
+ *
+ * Everything but the session is defaulted and overridable in one bag, because
+ * these travelled as four positional optionals and the fourth could not be set
+ * to `undefined` at all: passing it explicitly took the parameter's default.
  */
 export function holding(
   session: Session | null | undefined,
-  cycle: Cycle = { count: 0 },
-  intervals: Intervals = CLASSIC,
-  today: Today | undefined = { count: 0, totalMs: 0 },
+  over: Partial<SessionValue> = {},
 ): SessionValue {
   return {
     session,
-    cycle,
-    intervals,
-    today,
+    cycle: { count: 0 },
+    intervals: CLASSIC,
+    today: { count: 0, totalMs: 0 },
     start: async () => null,
     cancel: async () => {},
     confirm: async () => null,
     save: async () => {},
     reload: async () => {},
+    // Spread last so a caller can override any of it — including with an
+    // explicit `undefined`, which a defaulted positional parameter would have
+    // quietly replaced with its default.
+    ...over,
   };
 }
 

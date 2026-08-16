@@ -18,9 +18,12 @@ type profileDay struct {
 }
 
 type profilePayload struct {
-	Handle    string       `json:"handle"`
-	Days      []profileDay `json:"days"`
-	ServerNow int64        `json:"serverNow"`
+	Handle string       `json:"handle"`
+	Days   []profileDay `json:"days"`
+	// Whether this person has ever finished a pomodoro — a different question
+	// from whether the selected range has anything in it.
+	EverFocused bool  `json:"everFocused"`
+	ServerNow   int64 `json:"serverNow"`
 }
 
 func profileOf(t *testing.T, c *apitest.Client, handle string, query string) profilePayload {
@@ -220,5 +223,68 @@ func TestColumnsAreTehranDays(t *testing.T) {
 	}
 	if got["2026-03-16"] != (25 * time.Minute).Milliseconds() {
 		t.Errorf("the 16th totals %d, want 25m", got["2026-03-16"])
+	}
+}
+
+// The empty state belongs to somebody who has never focused, not to a range
+// that happens to be empty — which is the difference between "this person is
+// new" and "this person took a week off".
+func TestAWeekOffIsNotAnEmptyProfile(t *testing.T) {
+	h := apitest.New(t)
+	owner, category := working(t, h)
+	finish(t, h, owner, category, 25*time.Minute)
+
+	// A fortnight later, with nothing in between.
+	h.Clock.Advance(14 * 24 * time.Hour)
+
+	got := profileOf(t, visitor(h), "yazdan", "")
+	// The last seven days are all zero...
+	for _, day := range got.Days {
+		if day.TotalMs != 0 {
+			t.Fatalf("%s has focus time, and the fortnight should be empty", day.Day)
+		}
+	}
+	// ...and this person is still somebody who works. The chart draws a flat
+	// line, which is what the zero-fill is for; the empty state would be a
+	// claim about them rather than about the week.
+	if !got.EverFocused {
+		t.Error("a fortnight off reads as a profile that has never focused")
+	}
+}
+
+func TestAProfileThatHasNeverFocusedSaysSo(t *testing.T) {
+	h := apitest.New(t)
+	owner, category := working(t, h)
+
+	if got := profileOf(t, visitor(h), "yazdan", ""); got.EverFocused {
+		t.Error("a fresh account has focused")
+	}
+
+	// An abandoned pomodoro is not focus time, so it does not change the answer.
+	abandoned := payload(t, start(owner, category, pomodoro)).Session
+	owner.POST("/api/session/"+abandoned.ID+"/cancel", nil).ExpectStatus(http.StatusOK)
+	if got := profileOf(t, visitor(h), "yazdan", ""); got.EverFocused {
+		t.Error("an abandoned pomodoro counts as having focused")
+	}
+
+	// One seen through does.
+	finish(t, h, owner, category, 25*time.Minute)
+	if got := profileOf(t, visitor(h), "yazdan", ""); !got.EverFocused {
+		t.Error("a finished pomodoro does not count as having focused")
+	}
+}
+
+// Work older than the range still counts as having focused, which is the whole
+// point of asking separately from the chart.
+func TestEverFocusedLooksPastTheRange(t *testing.T) {
+	h := apitest.New(t)
+	owner, category := working(t, h)
+	finish(t, h, owner, category, 25*time.Minute)
+
+	h.Clock.Advance(200 * 24 * time.Hour)
+
+	got := profileOf(t, visitor(h), "yazdan", "?days=90")
+	if !got.EverFocused {
+		t.Error("work older than ninety days reads as never having focused")
 	}
 }

@@ -137,3 +137,15 @@ WHERE user_id = sqlc.arg(user_id)
   AND ends_at >= sqlc.arg(from_time)
   AND ends_at <= sqlc.arg(to_time)
 ORDER BY ends_at;
+
+-- name: HasCreditedWork :one
+-- Whether this account has ever finished a pomodoro.
+--
+-- Asked separately from the chart because it is a different question: the chart
+-- is about a range, and this is about a person. A week with nothing in it is a
+-- flat line — the zero-fill exists to draw exactly that — and only somebody who
+-- has never finished anything at all gets an empty state instead.
+SELECT EXISTS (
+    SELECT 1 FROM sessions
+    WHERE user_id = $1 AND kind = 'work' AND cancelled_at IS NULL AND ends_at <= $2
+);

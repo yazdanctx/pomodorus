@@ -43,6 +43,9 @@ class FakeSocket {
 
   close() {
     this.closed = true;
+    // A real socket's close is asynchronous, and onclose fires after the call
+    // returns. That gap is where a reconnect can race a re-acquire.
+    queueMicrotask(() => this.onclose?.());
   }
 
   /** The most recently opened one — the connection currently in play. */
@@ -206,6 +209,30 @@ describe("the live timer", () => {
     FakeSocket.last.push({ type: "feed", entries: [] });
 
     expect(screen.getByText(new RegExp(`s1 ends ${NOW + 25 * 60_000}`))).toBeTruthy();
+  });
+
+  it("does not chase a socket it closed itself when a listener returns", async () => {
+    // React's StrictMode mounts, cleans up and mounts again in development, so
+    // this is not a corner case — it is every page load. The close from the
+    // first cleanup lands *after* the second mount has already reopened, and
+    // the closing socket must not decide that it dropped.
+    api();
+    const first = renderAt(<Probe />, { auth: SIGNED_IN });
+    await waitFor(() => expect(FakeSocket.opened).toHaveLength(1));
+    first.unmount();
+
+    const second = renderAt(<Probe />, { auth: SIGNED_IN });
+    await waitFor(() => expect(FakeSocket.opened).toHaveLength(2));
+
+    // Let the first socket's close land, now that a second is live, and run
+    // past the whole reconnect backoff — a chase would fire inside it.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(FakeSocket.opened).toHaveLength(2);
+
+    // And the surviving socket is the live one: a frame on it still arrives.
+    FakeSocket.last.push(timerFrame(workSession()));
+    await screen.findByText(/s1 ends/);
+    second.unmount();
   });
 
   it("closes the socket when there is nobody to hold it for", async () => {

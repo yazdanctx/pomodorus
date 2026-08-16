@@ -30,11 +30,13 @@ function chart(days: number, worked: Record<string, number> = {}): Day[] {
 function server({
   handle = "yazdan",
   days = chart(7, { "2026-03-15": 75 * 60_000 }),
+  everFocused = true,
   status = 200,
   hold = false,
 }: {
   handle?: string;
   days?: Day[];
+  everFocused?: boolean;
   status?: number;
   hold?: boolean;
 } = {}) {
@@ -48,7 +50,7 @@ function server({
         headers: { "Content-Type": "application/json" },
       });
     }
-    return new Response(JSON.stringify({ handle, days, serverNow: NOW }), {
+    return new Response(JSON.stringify({ handle, days, everFocused, serverNow: NOW }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -133,11 +135,32 @@ describe("a public profile", () => {
     expect(screen.queryByRole("heading", { name: copy.profile.focusPerDay })).toBeNull();
   });
 
-  it("shows the empty state for somebody with no focus time", async () => {
-    server({ days: chart(7) });
+  it("shows the empty state for somebody who has never focused", async () => {
+    server({ days: chart(7), everFocused: false });
     renderProfile();
 
     await screen.findByText(copy.profile.emptyTitle);
+  });
+
+  it("draws a flat line for a week off, rather than calling the profile empty", async () => {
+    // Somebody with a history who did nothing in the selected range. The
+    // zero-fill exists to draw exactly this; telling them their profile is
+    // empty would be the chart making a claim about them, not about the week.
+    server({ days: chart(7), everFocused: true });
+    const { container } = renderProfile();
+
+    await waitFor(() => expect(container.querySelector("svg")).toBeTruthy());
+    expect(screen.queryByText(copy.profile.emptyTitle)).toBeNull();
+  });
+
+  it("says so when the read fails, rather than pulsing forever", async () => {
+    // A skeleton that never resolves is the app pretending to still be working
+    // on something it has given up on.
+    server({ status: 500 });
+    const { container } = renderProfile();
+
+    await screen.findByText(copy.login.serverError);
+    expect(container.querySelector(".animate-pulse")).toBeNull();
   });
 });
 

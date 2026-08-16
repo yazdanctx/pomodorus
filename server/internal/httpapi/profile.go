@@ -45,8 +45,16 @@ type profileResponse struct {
 	// Every day in the range, including the empty ones. A line drawn only
 	// through the days somebody worked would read a fortnight off as flat
 	// effort rather than as the absence it was.
-	Days      []profileDay `json:"days"`
-	ServerNow int64        `json:"serverNow"`
+	Days []profileDay `json:"days"`
+	// Whether this person has ever finished a pomodoro, which is a different
+	// question from whether the selected range has anything in it.
+	//
+	// The page's empty state belongs to somebody who has never focused at all.
+	// A week off is a flat line, and drawing it is the whole reason the days
+	// are zero-filled — telling a long-standing user their profile is empty
+	// because they took a holiday would be the chart lying about them.
+	EverFocused bool  `json:"everFocused"`
+	ServerNow   int64 `json:"serverNow"`
 }
 
 func (s *Server) getProfile(w http.ResponseWriter, r *http.Request) {
@@ -91,10 +99,20 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ever, err := s.q.HasCreditedWork(ctx, db.HasCreditedWorkParams{
+		UserID: user.ID, EndsAt: pgTime(now),
+	})
+	if err != nil {
+		s.log.Error("read profile", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, profileResponse{
-		Handle:    *user.Handle,
-		Days:      chart,
-		ServerNow: now.UnixMilli(),
+		Handle:      *user.Handle,
+		Days:        chart,
+		EverFocused: ever,
+		ServerNow:   now.UnixMilli(),
 	})
 }
 
@@ -120,7 +138,10 @@ var errUnknownRange = errors.New("httpapi: unknown chart range")
 // twenty-four-hour blocks measured back from this instant, which would put a
 // partial day at each end and a boundary in the middle of a column.
 func (s *Server) chart(ctx context.Context, user db.User, days int, now time.Time) ([]profileDay, error) {
-	from := timer.DayStart(now).AddDate(0, 0, -(days - 1))
+	// Counted back in Tehran rather than on the UTC instant, so the result is a
+	// day boundary even if Iran ever restores daylight saving — the same care
+	// `timer.Days` takes when it walks forward.
+	from := timer.DayStart(timer.DayStart(now).In(timer.Tehran).AddDate(0, 0, -(days - 1)))
 
 	rows, err := s.q.CreditedWorkBetween(ctx, db.CreditedWorkBetweenParams{
 		UserID:   user.ID,

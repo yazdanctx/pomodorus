@@ -150,6 +150,31 @@ func (q *Queries) CreditedWorkBetween(ctx context.Context, arg CreditedWorkBetwe
 	return items, nil
 }
 
+const hasCreditedWork = `-- name: HasCreditedWork :one
+SELECT EXISTS (
+    SELECT 1 FROM sessions
+    WHERE user_id = $1 AND kind = 'work' AND cancelled_at IS NULL AND ends_at <= $2
+)
+`
+
+type HasCreditedWorkParams struct {
+	UserID pgtype.UUID
+	EndsAt pgtype.Timestamptz
+}
+
+// Whether this account has ever finished a pomodoro.
+//
+// Asked separately from the chart because it is a different question: the chart
+// is about a range, and this is about a person. A week with nothing in it is a
+// flat line — the zero-fill exists to draw exactly that — and only somebody who
+// has never finished anything at all gets an empty state instead.
+func (q *Queries) HasCreditedWork(ctx context.Context, arg HasCreditedWorkParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasCreditedWork, arg.UserID, arg.EndsAt)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const hasLiveSessionForCategory = `-- name: HasLiveSessionForCategory :one
 SELECT EXISTS (
     SELECT 1 FROM sessions

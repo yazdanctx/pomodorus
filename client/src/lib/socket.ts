@@ -58,15 +58,16 @@ let attempt = 0;
 let wanted = 0;
 
 function open() {
-  socket = new WebSocket(socketURL());
+  const mine = new WebSocket(socketURL());
+  socket = mine;
 
-  socket.onopen = () => {
+  mine.onopen = () => {
     // Reaching the server resets the backoff, so an hour of tunnel followed by
     // a reconnection does not leave the next drop waiting half a minute.
     attempt = 0;
   };
 
-  socket.onmessage = (event: MessageEvent) => {
+  mine.onmessage = (event: MessageEvent) => {
     let frame: unknown;
     try {
       frame = JSON.parse(String(event.data));
@@ -85,10 +86,17 @@ function open() {
 
   // An error is always followed by a close, so there is exactly one place that
   // decides to try again.
-  socket.onerror = () => {};
-  socket.onclose = () => {
+  mine.onerror = () => {};
+  mine.onclose = () => {
     // Nobody is left to hear it, and this close is the one we asked for.
     if (wanted === 0) return;
+    // Nor is this the connection in play any more. A close is delivered a turn
+    // after `close()` returns, and in that turn a listener can have arrived and
+    // opened a fresh socket — which is every mount under React's StrictMode,
+    // and every quick route change. Without this the socket we just discarded
+    // would decide it had dropped, reconnect on its own, and leave two live
+    // connections feeding one set of listeners.
+    if (socket !== mine) return;
     // Every close is retried, including a refused upgrade, because the browser
     // does not hand the status of a failed upgrade to script — there is no way
     // from here to tell a 401 from a tunnel. The cap is what makes that

@@ -92,7 +92,7 @@ function Way() {
   return (
     <div className="flex flex-wrap items-center justify-center gap-3">
       {auth.status === "loading" ? (
-        <Skeleton className="h-11 w-40 rounded-none" />
+        <Skeleton className="h-11 w-40" />
       ) : auth.status === "authenticated" ? (
         <Button asChild size="lg" className="w-40">
           <Link to="/app">{copy.landing.goWork}</Link>

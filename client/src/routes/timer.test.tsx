@@ -963,10 +963,7 @@ describe("today's focus", () => {
     // when the answer lands.
     const unknown = renderAt(<TimerRoute />, {
       auth: SIGNED_IN,
-      // Spread rather than passed, because an explicit `undefined` argument
-      // takes a parameter's default — and the default here is a known-empty
-      // day, which is the opposite of what this asserts.
-      session: { ...holding(null), today: undefined },
+      session: holding(null, { today: undefined }),
     });
     const blank = unknown.container.querySelector("p.h-5");
     expect(blank).toBeTruthy();
@@ -975,7 +972,7 @@ describe("today's focus", () => {
 
     const known = renderAt(<TimerRoute />, {
       auth: SIGNED_IN,
-      session: { ...holding(null), today: { count: 2, totalMs: 50 * 60_000 } },
+      session: holding(null, { today: { count: 2, totalMs: 50 * 60_000 } }),
     });
     const filled = known.container.querySelector("p.h-5");
     // The same box, now with something in it.

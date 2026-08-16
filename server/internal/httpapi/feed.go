@@ -101,15 +101,16 @@ func feedEntryFor(row db.LiveFeedRow) (feedEntry, bool) {
 		return feedEntry{}, false
 	}
 
+	kind := kindOf(row.Kind)
 	entry := feedEntry{
 		Handle: handle,
-		Kind:   string(kindOf(row.Kind)),
+		Kind:   string(kind),
 		EndsAt: row.EndsAt.Time.UnixMilli(),
 	}
 
 	// A break belongs to no task, and saying whose rest it is would be saying
 	// what they had been working on.
-	if kindOf(row.Kind) != timer.Work {
+	if kind != timer.Work {
 		return entry, true
 	}
 

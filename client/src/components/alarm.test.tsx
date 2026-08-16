@@ -37,7 +37,7 @@ function Mounted({
   session: Session | null;
   confirm?: () => Promise<null>;
 }) {
-  const value = { ...holding(session), confirm: confirm ?? (async () => null) };
+  const value = holding(session, { confirm: confirm ?? (async () => null) });
   return (
     <AuthProvider value={auth}>
       <SessionProvider value={value}>

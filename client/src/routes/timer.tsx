@@ -269,7 +269,9 @@ function StartScreen({
  */
 function TodayLine({ today }: { today: Today | undefined }) {
   return (
-    <p className="flex h-5 items-center justify-center pt-6 text-xs text-muted-foreground">
+    // Margin rather than padding: `pt-6` inside `h-5` is padding larger than
+    // the box it is in, so the row was never the height it claimed.
+    <p className="mt-6 flex h-5 items-center justify-center text-xs text-muted-foreground">
       {today === undefined
         ? null
         : today.count === 0

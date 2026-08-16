@@ -2,19 +2,14 @@ import { LogOut } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
+import { Failure } from "@/components/failure";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { post } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { copy, t } from "@/lib/copy";
 import { enDigits, faDigits } from "@/lib/format";
-import {
-  DEFAULT_RANGE,
-  isEmpty,
-  RANGES,
-  useProfile,
-  type Range,
-} from "@/lib/profile";
+import { DEFAULT_RANGE, RANGES, useProfile, type Range } from "@/lib/profile";
 
 /**
  * Loaded only when somebody opens a profile.
@@ -41,7 +36,7 @@ export function ProfileRoute() {
   const { handle = "" } = useParams();
   const auth = useAuth();
   const [range, setRange] = useState<Range>(DEFAULT_RANGE);
-  const { handle: canonical, days, missing } = useProfile(handle, range);
+  const { handle: canonical, days, everFocused, missing, failed } = useProfile(handle, range);
 
   // Whose page this is. Compared against the canonical handle when there is
   // one, so a link typed in the wrong case still recognises its owner.
@@ -67,9 +62,14 @@ export function ProfileRoute() {
         </div>
 
         <div className="mt-4">
-          {days === undefined ? (
+          {failed ? (
+            <Failure message={copy.login.serverError} />
+          ) : days === undefined ? (
             <ChartSkeleton />
-          ) : isEmpty(days) ? (
+          ) : !everFocused ? (
+            // Never focused at all, which is not the same as a range that
+            // happens to be empty: a week off is a flat line, and the zero-fill
+            // exists to draw it.
             <Empty />
           ) : (
             <Suspense fallback={<ChartSkeleton />}>
@@ -84,7 +84,7 @@ export function ProfileRoute() {
 
 /** The chart area's exact box, held while either its code or its data arrives. */
 function ChartSkeleton() {
-  return <Skeleton className="h-44 w-full rounded-none" />;
+  return <Skeleton className="h-44 w-full" />;
 }
 
 /**
@@ -164,7 +164,7 @@ function Ranges({
 /** Somebody real who has not finished a pomodoro yet. */
 function Empty() {
   return (
-    <div className="flex flex-col items-center gap-6 border p-12 text-center sm:p-20">
+    <div className="mt-6 flex flex-col items-center gap-6 border p-12 text-center sm:p-20">
       <p className="text-sm text-muted-foreground">{copy.profile.emptyTitle}</p>
     </div>
   );
