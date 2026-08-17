@@ -94,3 +94,9 @@ without a database. Integration tests use a real Postgres, never a mock.
 
 Copy is Persian and lives in `client/src/copy.json` — extremely casual
 Gen-Z register, including error messages. Repo docs stay formal.
+
+The one exception is the link-preview text in `server/internal/web/meta.go`:
+it is markup for crawlers rather than words on a screen, no reader of the app
+ever sees it, and the alternative is the server reading the client's bundle at
+request time. Nothing else in Go carries Persian — an API error is a code, and
+the sentence for it lives in `copy.json`.

@@ -6,11 +6,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yazdanctx/pomodorus/server/internal/auth"
@@ -38,6 +42,12 @@ type Deps struct {
 	// would swap for Postgres LISTEN/NOTIFY, and the handlers would not notice.
 	Live live.Broadcaster
 
+	// Client is the built React client, defaulting to the one embedded in the
+	// binary. It is a seam so that a test can stand up a shell and assert on
+	// the HTML this server actually serves — in development it is empty and
+	// Vite serves the client itself.
+	Client fs.FS
+
 	// SocketPing is the keepalive interval, defaulting to DefaultSocketPing. It
 	// is real time rather than the injected clock — it is a fact about the
 	// network and the proxy in front of it, not about the timer — so a test
@@ -54,6 +64,7 @@ type Server struct {
 	auth       *auth.Service
 	live       live.Broadcaster
 	socketPing time.Duration
+	client     fs.FS
 	mux        *http.ServeMux
 }
 
@@ -68,6 +79,7 @@ func New(deps Deps) *Server {
 		auth:       auth.NewService(queries, deps.Clock, deps.Mailer),
 		live:       deps.Live,
 		socketPing: deps.SocketPing,
+		client:     deps.Client,
 		mux:        http.NewServeMux(),
 	}
 	if s.live == nil {
@@ -122,11 +134,48 @@ func (s *Server) routes() {
 	// posts above. Open to visitors, who receive the feed and nothing else.
 	s.mux.HandleFunc("GET /ws", s.socket)
 
-	if h, ok := web.Handler(); ok {
+	// The client, and with it the only HTML this server writes: the public
+	// routes carry link-preview tags injected into the shell on the way out.
+	if h, ok := web.Handler(web.Options{
+		Files:       s.client,
+		Origin:      s.origin,
+		KnownHandle: s.knownHandle,
+	}); ok {
 		s.mux.Handle("/", h)
 	} else {
 		s.mux.HandleFunc("/", s.noClient)
 	}
+}
+
+// origin is the absolute base of a link to this server, as the caller reached
+// it. The scheme is read off the connection the same way the session cookie's
+// Secure flag is, so a link shared from behind the TLS proxy is https.
+func (s *Server) origin(r *http.Request) string {
+	scheme := "http"
+	if s.isHTTPS(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// knownHandle says whether a profile link points at somebody. A failed lookup
+// is a no: the page renders either way, and the cost is a preview that
+// describes the app instead of the person.
+func (s *Server) knownHandle(ctx context.Context, handle string) bool {
+	// A shorter budget than any handler's, deliberately: this query is not
+	// what the reader came for, and a slow database should cost the preview
+	// rather than hold the page open waiting to describe it.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	name := handle
+	if _, err := s.q.UserByHandle(ctx, &name); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			s.log.Error("preview lookup", "error", err)
+		}
+		return false
+	}
+	return true
 }
 
 // now is the instant handlers reason from and every response reports. It reads

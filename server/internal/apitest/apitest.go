@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -28,6 +29,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -72,6 +74,7 @@ type deployment struct {
 	cfg       config.Config
 	overTLS   bool
 	pingEvery time.Duration
+	client    fs.FS
 }
 
 // An Option changes how the server under test is deployed, not what it does.
@@ -96,6 +99,19 @@ func OverTLS() Option {
 // proxy cannot be made to believe the test's clock.
 func Keepalive(every time.Duration) Option {
 	return func(d *deployment) { d.pingEvery = every }
+}
+
+// WithClient builds a client into the server under test, which the binary
+// normally has and a test binary never does — `go test` embeds no dist.
+//
+// The shell is the test's own so that the assertion is about what this server
+// does to a page rather than about whatever the last `npm run build` left
+// behind: what is asserted on is still HTML that came out of the real handler
+// over real HTTP.
+func WithClient(shell string) Option {
+	return func(d *deployment) {
+		d.client = fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte(shell)}}
+	}
 }
 
 // New starts a server on a freshly emptied schema.
@@ -124,6 +140,7 @@ func New(t *testing.T, options ...Option) *Harness {
 		// Left at its default unless a test asked otherwise, so the socket
 		// under test is the one that ships.
 		SocketPing: stood.pingEvery,
+		Client:     stood.client,
 		// Discarded rather than routed to the test log: the handlers log
 		// server errors, and a test that deliberately provokes one should not
 		// look like a failure.
@@ -137,6 +154,10 @@ func New(t *testing.T, options ...Option) *Harness {
 	h.Client = h.NewClient()
 	return h
 }
+
+// URL is where the server under test is reachable, which is the origin a link
+// to it carries.
+func (h *Harness) URL() string { return h.server.URL }
 
 // Certificate is the httptest server's own, which a client has to trust to
 // reach it over TLS.
