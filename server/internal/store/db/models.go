@@ -84,6 +84,14 @@ type LoginCode struct {
 	ConsumedAt  pgtype.Timestamptz
 }
 
+type PushSubscription struct {
+	Endpoint  string
+	UserID    pgtype.UUID
+	P256dh    string
+	Auth      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Session struct {
 	ID           pgtype.UUID
 	UserID       pgtype.UUID

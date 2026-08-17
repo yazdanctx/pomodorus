@@ -39,6 +39,12 @@ type Config struct {
 	// is the host's own email service. The same client runs in both, so what
 	// is exercised in development is the code path that ships.
 	SMTP SMTPConfig
+
+	// How this server names itself to the browsers' push services. Absent in
+	// development, where most work has nothing to do with the bell reaching a
+	// closed tab, and required in production, where its absence would be a
+	// promise the install prompt makes and the app then quietly breaks.
+	VAPID VAPIDConfig
 }
 
 // SMTPConfig deliberately mirrors mail.SMTPConfig rather than being it: the
@@ -50,6 +56,27 @@ type SMTPConfig struct {
 	Username string
 	Password string
 	From     string
+}
+
+// VAPIDConfig is the keypair every push service knows this server by, and the
+// address one of them would use to complain. It mirrors push.VAPID for the
+// same reason SMTPConfig mirrors mail.SMTPConfig: this package reads the
+// environment and should not depend on what the values are for.
+//
+// The keypair is permanent. Rotating it invalidates every subscription ever
+// handed out — silently, since a browser has no way to be told — so it is
+// configuration read from the environment and never something minted at boot.
+type VAPIDConfig struct {
+	Subject    string
+	PublicKey  string
+	PrivateKey string
+}
+
+// Configured says the bell can reach a closed tab. Everything the push path
+// touches is written to be a no-op when this is false, so development without
+// a keypair is development with one feature missing rather than a broken app.
+func (v VAPIDConfig) Configured() bool {
+	return v.PublicKey != "" && v.PrivateKey != ""
 }
 
 func Load() (Config, error) {
@@ -69,6 +96,11 @@ func Load() (Config, error) {
 			Password: env("SMTP_PASSWORD", ""),
 			From:     env("SMTP_FROM", "Pomodorus <no-reply@pomodorus.local>"),
 		},
+		VAPID: VAPIDConfig{
+			Subject:    env("VAPID_SUBJECT", ""),
+			PublicKey:  env("VAPID_PUBLIC_KEY", ""),
+			PrivateKey: env("VAPID_PRIVATE_KEY", ""),
+		},
 	}
 
 	if c.DatabaseURL == "" {
@@ -80,7 +112,37 @@ func Load() (Config, error) {
 	if c.FastSessions && c.Env == "production" {
 		return c, fmt.Errorf("FAST_SESSIONS must never be set in production: it mints focus time out of nothing")
 	}
+	if err := c.checkVAPID(); err != nil {
+		return c, err
+	}
 	return c, nil
+}
+
+// checkVAPID refuses the half-configured cases rather than letting them turn
+// into a bell that silently never arrives.
+//
+// Half a keypair is always a mistake: a subscription minted against a public
+// key that nothing can sign for is a device that will never be reached, and
+// nothing about it looks wrong until somebody waits out a pomodoro. In
+// production the absent case is a mistake too — push is the whole reason the
+// app is installable — so it is the one thing here that fails the boot.
+func (c Config) checkVAPID() error {
+	v := c.VAPID
+	if (v.PublicKey == "") != (v.PrivateKey == "") {
+		return fmt.Errorf("VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be set together: half a keypair mints subscriptions nothing can send to")
+	}
+	if !v.Configured() {
+		if c.Env == "production" {
+			return fmt.Errorf("VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are required in production: without them no bell reaches a closed tab. Generate a pair with `make vapid`")
+		}
+		return nil
+	}
+	// RFC 8292 wants a way to reach whoever runs the server, and the push
+	// services enforce the shape rather than the address.
+	if !strings.HasPrefix(v.Subject, "mailto:") && !strings.HasPrefix(v.Subject, "https://") {
+		return fmt.Errorf("VAPID_SUBJECT must be a mailto: or https:// URL, got %q", v.Subject)
+	}
+	return nil
 }
 
 func (c Config) IsDev() bool { return c.Env == "development" }

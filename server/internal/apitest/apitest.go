@@ -1,5 +1,6 @@
 // Package apitest drives the real server over real HTTP against a real
-// Postgres, with two dependencies injected: the clock and the mailer.
+// Postgres, with three dependencies injected: the clock, the mailer, and the
+// push service on the far side of a notification.
 //
 // This is the app's primary test seam. What it asserts on is what somebody
 // could observe — a status code, a payload, a row that appears in a feed — so
@@ -28,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -38,6 +40,7 @@ import (
 	"github.com/yazdanctx/pomodorus/server/internal/config"
 	"github.com/yazdanctx/pomodorus/server/internal/httpapi"
 	"github.com/yazdanctx/pomodorus/server/internal/mail"
+	"github.com/yazdanctx/pomodorus/server/internal/push"
 	"github.com/yazdanctx/pomodorus/server/internal/store"
 )
 
@@ -55,17 +58,58 @@ const OriginDay = "2026-03-15"
 type Harness struct {
 	t      *testing.T
 	server *httptest.Server
+	stood  deployment
+
+	// The server behind the URL, swappable so that Reboot can replace it
+	// without the clients that hold that URL — or their cookies — noticing.
+	mu  sync.RWMutex
+	api *httpapi.Server
+
+	// The clock the server itself is given, which the harness clock above
+	// wraps. Handing the wrapper to the server would work and would also mean
+	// the server could ring bells by asking what time it is.
+	fixed *clock.Fixed
 
 	// Clock is the server's only source of time. Advance it to reach expiry,
 	// the bell, the end of a break — instantly, and without a sleep anywhere.
-	Clock *clock.Fixed
+	Clock *Clock
 	// Mail holds every message the server sent, so a test can read the code
 	// the user would have read.
 	Mail *mail.Memory
-	DB   *pgxpool.Pool
+	// Push holds every notification the server handed to a push service, so a
+	// test can assert that a device was told without one existing.
+	Push *push.Memory
+	// Bells are the pending notifications, waiting on the harness clock. They
+	// are rung by moving that clock rather than by time passing, and survive
+	// nothing but the process — Reboot drops them, exactly as a restart does.
+	Bells *push.Manual
+	DB    *pgxpool.Pool
 
 	// The default client, with its own cookie jar — one browser.
 	*Client
+}
+
+// Clock is the harness clock: the server's fixed clock, plus the one thing a
+// fixed clock cannot do for itself.
+//
+// Moving it also rings any bell it has passed. The two are one gesture because
+// they are one fact — real time would have fired that notification — and
+// because two ways of moving time would mean a test that advanced past a bell
+// and quietly got no push. Everything else about the timer needs no such help:
+// session state is derived, so moving the clock is the whole of it.
+type Clock struct {
+	*clock.Fixed
+	ring func()
+}
+
+func (c *Clock) Advance(d time.Duration) {
+	c.Fixed.Advance(d)
+	c.ring()
+}
+
+func (c *Clock) Set(at time.Time) {
+	c.Fixed.Set(at)
+	c.ring()
 }
 
 // deployment is how the server under test is stood up — the facts about its
@@ -101,6 +145,21 @@ func Keepalive(every time.Duration) Option {
 	return func(d *deployment) { d.pingEvery = every }
 }
 
+// WithVAPID gives the deployment a keypair, which is what a production one
+// always has. The push tests do not need it — they inject a sender that
+// records rather than encrypts — so it exists for the one question that is
+// about the deployment rather than about a bell: what a browser is handed when
+// it asks for the key to subscribe against.
+func WithVAPID(publicKey string) Option {
+	return func(d *deployment) {
+		d.cfg.VAPID = config.VAPIDConfig{
+			Subject:    "mailto:someone@example.com",
+			PublicKey:  publicKey,
+			PrivateKey: "private",
+		}
+	}
+}
+
 // WithClient builds a client into the server under test, which the binary
 // normally has and a test binary never does — `go test` embeds no dist.
 //
@@ -129,30 +188,109 @@ func New(t *testing.T, options ...Option) *Harness {
 		option(&stood)
 	}
 
+	h := &Harness{
+		t: t, stood: stood, fixed: fixed,
+		Mail: inbox, Push: push.NewMemory(), DB: pool,
+	}
+	// The bells are replaced on every boot, so what the clock rings is looked
+	// up rather than captured.
+	h.Clock = &Clock{Fixed: fixed, ring: func() { h.Bells.Due() }}
+
 	newServer := httptest.NewServer
 	if stood.overTLS {
 		newServer = httptest.NewTLSServer
 	}
+	// One long-lived URL in front of a server that can be replaced. What is
+	// under test is still the real handler over real HTTP; the indirection
+	// exists so that "the process restarted" is expressible without every
+	// client in the test having to be rebuilt around a new address.
+	h.server = newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.RLock()
+		api := h.api
+		h.mu.RUnlock()
+		if api == nil {
+			// Halted. A process that is not running answers nothing, and a test
+			// that reaches it while it is down should say so rather than get a
+			// quietly served page.
+			http.Error(w, "the server is halted", http.StatusServiceUnavailable)
+			return
+		}
+		api.ServeHTTP(w, r)
+	}))
+	t.Cleanup(h.server.Close)
 
-	server := newServer(httpapi.New(httpapi.Deps{
-		Config: stood.cfg,
-		DB:     pool,
+	h.boot()
+	h.Client = h.NewClient()
+	return h
+}
+
+// boot stands up a server on the schema as it is, exactly as the binary does:
+// construct, then rebuild the pending notifications from a single query.
+//
+// The in-memory bells are new every time. That is the whole point of them
+// being in memory — a process that restarts has none until it has asked the
+// database what is still coming.
+func (h *Harness) boot() {
+	h.t.Helper()
+
+	h.Bells = push.NewManual(h.fixed)
+	api := httpapi.New(httpapi.Deps{
+		Config: h.stood.cfg,
+		DB:     h.DB,
 		// Left at its default unless a test asked otherwise, so the socket
 		// under test is the one that ships.
-		SocketPing: stood.pingEvery,
-		Client:     stood.client,
+		SocketPing: h.stood.pingEvery,
+		Client:     h.stood.client,
 		// Discarded rather than routed to the test log: the handlers log
 		// server errors, and a test that deliberately provokes one should not
 		// look like a failure.
-		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Clock:  fixed,
-		Mailer: inbox,
-	}))
-	t.Cleanup(server.Close)
+		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Clock:      h.fixed,
+		Mailer:     h.Mail,
+		PushSender: h.Push,
+		PushDelay:  h.Bells,
+	})
+	if err := api.Start(context.Background()); err != nil {
+		h.t.Fatal(err)
+	}
 
-	h := &Harness{t: t, server: server, Clock: fixed, Mail: inbox, DB: pool}
-	h.Client = h.NewClient()
-	return h
+	h.mu.Lock()
+	old := h.api
+	h.api = api
+	h.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
+	h.t.Cleanup(api.Close)
+}
+
+// Halt stops the server without starting another: the process is gone, every
+// in-memory timer with it, and the database untouched.
+//
+// It is the first half of a crash, and the only way to express time passing
+// with nothing listening — moving the clock rings the bells the running server
+// armed, which is exactly what a halted one would not do.
+func (h *Harness) Halt() {
+	h.t.Helper()
+	h.mu.Lock()
+	api := h.api
+	h.api = nil
+	h.mu.Unlock()
+	if api != nil {
+		api.Close()
+	}
+}
+
+// Reboot replaces the running server with a fresh one on the same database,
+// which is what a deploy or a crash does.
+//
+// Everything in memory goes: the pending notifications, the socket hub, the
+// rate limiters. Nothing in the database moves. A test that reboots mid-session
+// is asking the one question this app's architecture exists to answer — whether
+// the timer is still the timer afterwards.
+func (h *Harness) Reboot() {
+	h.t.Helper()
+	h.boot()
 }
 
 // URL is where the server under test is reachable, which is the origin a link

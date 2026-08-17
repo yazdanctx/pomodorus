@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down logs dev server client build run test test-server test-client profanity fmt tidy psql mail clean
+.PHONY: help up down logs dev server client build run test test-server test-client vapid profanity fmt tidy psql mail clean
 
 ## help: list targets
 help:
@@ -58,6 +58,13 @@ test-server:
 ## test-client: Vitest
 test-client:
 	cd client && npm test
+
+## vapid: print a fresh VAPID keypair for a deployment's environment
+# Once per deployment, and keep the answer: the keypair is this server's
+# permanent name to the push services, and replacing it silently invalidates
+# every subscription any browser has ever handed over.
+vapid:
+	@cd server && go run ./cmd/vapid
 
 ## profanity: rebuild the wordlist from its public sources (needs a network)
 # Words are added in cmd/build-profanity, never in the generated JSON — a

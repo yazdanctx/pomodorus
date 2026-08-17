@@ -19,6 +19,7 @@ import { copy, t } from "@/lib/copy";
 import { faClock, faDigits, faDuration, faElapsed } from "@/lib/format";
 import type { Intervals } from "@/lib/intervals";
 import { usePersisted } from "@/lib/persisted";
+import { enableNotifications } from "@/lib/push";
 import { useTick } from "@/lib/server-clock";
 import {
   breakSurvives,
@@ -38,12 +39,14 @@ const isNullableString = (value: unknown): value is string | null =>
  * A user gesture is the only moment a browser will unlock audio or show the
  * permission prompt, and both are for a bell that is still 25 minutes away.
  * Asked for whenever something is started, or the ring arrives in silence.
+ *
+ * The permission is asked for once and then used by both carriers of the ring:
+ * the tab's own notification, and — for the tab that is closed by the time the
+ * bell goes — the push subscription this also registers.
  */
 function primeAlerts() {
   unlockAudio();
-  if ("Notification" in window && Notification.permission === "default") {
-    void Notification.requestPermission();
-  }
+  void enableNotifications();
 }
 
 /** What to call a session: the task it is on, or the kind of rest it is. */

@@ -53,6 +53,53 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name: "no VAPID keys in development is a missing feature, not an error",
+			env:  map[string]string{},
+			check: func(t *testing.T, c Config) {
+				if c.VAPID.Configured() {
+					t.Error("expected push to be off with no keys")
+				}
+			},
+		},
+		{
+			name: "production without VAPID keys is refused",
+			// The install prompt promises a bell that reaches a closed tab.
+			// Shipping without the keys is shipping that promise broken, and
+			// nothing about it looks wrong until somebody waits out a pomodoro.
+			env:     map[string]string{"ENV": "production"},
+			wantErr: true,
+		},
+		{
+			name: "half a keypair is refused",
+			env: map[string]string{
+				"VAPID_PUBLIC_KEY": "public",
+				"VAPID_SUBJECT":    "mailto:someone@example.com",
+			},
+			wantErr: true,
+		},
+		{
+			name: "a VAPID subject that is not a way to reach anybody is refused",
+			env: map[string]string{
+				"VAPID_PUBLIC_KEY":  "public",
+				"VAPID_PRIVATE_KEY": "private",
+				"VAPID_SUBJECT":     "someone@example.com",
+			},
+			wantErr: true,
+		},
+		{
+			name: "a whole keypair turns push on",
+			env: map[string]string{
+				"VAPID_PUBLIC_KEY":  "public",
+				"VAPID_PRIVATE_KEY": "private",
+				"VAPID_SUBJECT":     "mailto:someone@example.com",
+			},
+			check: func(t *testing.T, c Config) {
+				if !c.VAPID.Configured() {
+					t.Error("expected push to be on")
+				}
+			},
+		},
+		{
 			name: "whitespace-only values fall back rather than being honoured",
 			env:  map[string]string{"ADDR": "   "},
 			check: func(t *testing.T, c Config) {
@@ -70,7 +117,10 @@ func TestLoad(t *testing.T) {
 			}
 			// Setenv only sets what the case named; clear the rest so the
 			// developer's own shell cannot change the result.
-			for _, k := range []string{"ENV", "ADDR", "DATABASE_URL", "FAST_SESSIONS"} {
+			for _, k := range []string{
+				"ENV", "ADDR", "DATABASE_URL", "FAST_SESSIONS",
+				"VAPID_SUBJECT", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY",
+			} {
 				if _, ok := tc.env[k]; !ok {
 					t.Setenv(k, "")
 				}

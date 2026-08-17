@@ -478,6 +478,12 @@ func (s *Server) cancelSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// There is no longer a bell here to announce. Dropped before the answer
+	// goes out because it cannot fail and nothing waits on it — and because a
+	// notification for a session somebody deliberately abandoned is the single
+	// most annoying thing this feature could do.
+	s.push.Disarm(id)
+
 	// Answering with the state afterwards rather than with nothing: the caller
 	// asked to change the timer and wants to know what the timer now is. The
 	// other device wants to know the same thing and did not ask, which is what
@@ -605,6 +611,14 @@ func (s *Server) confirmSession(w http.ResponseWriter, r *http.Request) {
 	// A confirmation both takes a pomodoro out of the feed and, when a break
 	// survived the ring, puts that break into it.
 	s.publishFeed(ctx, now)
+
+	// This bell has been heard, so its notification — which by now has already
+	// gone — is dropped, and the break that survived the ring gets one of its
+	// own. Both after the commit, for the same reason the push is: an armed
+	// bell for a break that a rolled-back transaction never started would be
+	// an alarm about something that did not happen.
+	s.push.Disarm(id)
+	s.armBell(user, state)
 }
 
 // startBreak begins the rest a just-acknowledged pomodoro owes, if any of it
@@ -683,6 +697,10 @@ func (s *Server) writeTimerState(ctx context.Context, w http.ResponseWriter, use
 func (s *Server) writeTimerChange(ctx context.Context, w http.ResponseWriter, user db.User, now time.Time) {
 	if state, ok := s.writeTimerState(ctx, w, user, now); ok {
 		s.publishTimer(ctx, user, state)
+		// And the bell is armed for whatever the timer now is, so a tab closed
+		// a minute from here still hears it. Arming replaces, so a change that
+		// moved nothing re-arms the same instant.
+		s.armBell(user, state)
 	}
 }
 

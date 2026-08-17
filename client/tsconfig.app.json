@@ -20,5 +20,9 @@
     "paths": { "@/*": ["./src/*"] },
     "baseUrl": "."
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The service worker is not part of the app: it runs in a scope with no
+  // document and no window, and it is type-checked by tsconfig.worker.json
+  // against those globals instead.
+  "exclude": ["src/sw.ts", "src/sw.test.ts"]
 }

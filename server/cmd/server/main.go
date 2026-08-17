@@ -45,15 +45,26 @@ func run(log *slog.Logger) error {
 	defer db.Close()
 	log.Info("database ready, schema up to date")
 
+	api := httpapi.New(httpapi.Deps{
+		Config: cfg,
+		DB:     db,
+		Log:    log,
+		Clock:  clock.System(),
+		Mailer: mail.NewSMTP(mail.SMTPConfig(cfg.SMTP)),
+	})
+	// The one thing this process does at boot besides listening: rebuild the
+	// pending push notifications from a single query. Nothing was lost with
+	// the old process — session state is derived from rows and now(), always —
+	// so a failure here costs notifications rather than the timer, and is
+	// logged rather than fatal.
+	if err := api.Start(ctx); err != nil {
+		log.Error("push: could not rebuild pending bells", "error", err)
+	}
+	defer api.Close()
+
 	srv := &http.Server{
-		Addr: cfg.Addr,
-		Handler: httpapi.New(httpapi.Deps{
-			Config: cfg,
-			DB:     db,
-			Log:    log,
-			Clock:  clock.System(),
-			Mailer: mail.NewSMTP(mail.SMTPConfig(cfg.SMTP)),
-		}),
+		Addr:    cfg.Addr,
+		Handler: api,
 		// Generous but finite: a WebSocket upgrade will opt out of the write
 		// deadline itself, and nothing else here is long-lived.
 		ReadHeaderTimeout: 10 * time.Second,
@@ -62,7 +73,9 @@ func run(log *slog.Logger) error {
 
 	errs := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.Addr, "env", cfg.Env, "fastSessions", cfg.FastSessions)
+		log.Info("listening",
+			"addr", cfg.Addr, "env", cfg.Env,
+			"fastSessions", cfg.FastSessions, "push", cfg.VAPID.Configured())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 		}

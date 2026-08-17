@@ -26,6 +26,20 @@ branch.
 
 The schema migrates itself on boot, so there is no migrate step to forget.
 
+## Web Push
+
+The bell reaches a closed tab through Web Push, which needs a VAPID keypair.
+Locally there is none and push is simply off — everything else works, and the
+ring still arrives in any open tab. To try it, generate a pair and put it in
+the server's environment:
+
+```bash
+make vapid   # prints VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+```
+
+The keypair is permanent: replacing it silently invalidates every subscription
+any browser has ever handed over. Production refuses to boot without one.
+
 ## Building
 
 ```bash

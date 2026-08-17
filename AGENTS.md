@@ -43,7 +43,9 @@ Single-context: one `CONTEXT.md` at the repo root plus `docs/adr/`. See
 already runs a native Postgres on 5432 and something else on 8080 and 5173.
 
 `make build` builds the client into the binary. `make psql` opens a database
-shell.
+shell. `make vapid` prints the keypair Web Push needs — without one in the
+environment push is off, which is the normal state locally and a refused boot
+in production.
 
 ## Rules that are not obvious
 
@@ -83,7 +85,8 @@ session could mint focus time from nothing. It is refused outright in
 production.
 
 **Offline is out of scope.** v1 was local-first; this is not. Do not add local
-queues, replay, or conflict resolution.
+queues, replay, or conflict resolution. There *is* a service worker, and it
+exists solely to receive a push — it caches nothing, and must not start.
 
 ## Style
 

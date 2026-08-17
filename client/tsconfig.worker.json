@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // The service worker's globals are not the page's: no `document`, no
+    // `window`, and a `self` that can show a notification. It gets its own
+    // project for exactly that reason — pulling WebWorker into the app's lib
+    // would let a component reach for something only the worker has.
+    "lib": ["ES2022", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "composite": true
+  },
+  "include": ["src/sw.ts", "src/sw.test.ts", "src/copy.json"]
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/yazdanctx/pomodorus/server/internal/config"
 	"github.com/yazdanctx/pomodorus/server/internal/live"
 	"github.com/yazdanctx/pomodorus/server/internal/mail"
+	"github.com/yazdanctx/pomodorus/server/internal/push"
 	"github.com/yazdanctx/pomodorus/server/internal/store/db"
 	"github.com/yazdanctx/pomodorus/server/internal/web"
 )
@@ -53,6 +54,19 @@ type Deps struct {
 	// network and the proxy in front of it, not about the timer — so a test
 	// that wants to watch a socket idle turns it down instead of moving a clock.
 	SocketPing time.Duration
+
+	// PushSender delivers a notification to one device, defaulting to the real
+	// encrypted post at the browser's push service — and to nothing at all
+	// when this deployment has no VAPID keypair. A test supplies one that
+	// records, which is what makes "this device was told" observable without a
+	// push service, a network or a browser.
+	PushSender push.Sender
+
+	// PushDelay is how the notifier waits for a bell, defaulting to real time.
+	// It is the one thing in the app the injected clock cannot express — a
+	// fixed clock never arrives anywhere — so a test hands over a wait it
+	// fires by hand.
+	PushDelay push.Delay
 }
 
 type Server struct {
@@ -66,6 +80,10 @@ type Server struct {
 	socketPing time.Duration
 	client     fs.FS
 	mux        *http.ServeMux
+
+	// The pending bells. Nil when this deployment cannot send any, which every
+	// call site treats as a Notifier that does nothing rather than branching.
+	push *push.Notifier
 }
 
 func New(deps Deps) *Server {
@@ -88,9 +106,54 @@ func New(deps Deps) *Server {
 	if s.socketPing <= 0 {
 		s.socketPing = DefaultSocketPing
 	}
+	s.push = newNotifier(deps, queries)
 	s.routes()
 	return s
 }
+
+// newNotifier builds the pending-bell timers, or nothing.
+//
+// Nothing is the honest answer for a deployment with no VAPID keypair: there
+// is no address it could send from, so arming a timer would be arranging to
+// fail silently in twenty-five minutes. `push.New` returns a nil *Notifier for
+// that, and every call site is written to accept one.
+func newNotifier(deps Deps, queries *db.Queries) *push.Notifier {
+	sender := deps.PushSender
+	if sender == nil && deps.Config.VAPID.Configured() {
+		sender = push.NewWebPush(push.VAPID(deps.Config.VAPID))
+	}
+	if sender == nil {
+		return nil
+	}
+	return push.New(push.Deps{
+		Store:  pushStore{q: queries},
+		Sender: sender,
+		Delay:  deps.PushDelay,
+		Clock:  deps.Clock,
+		Log:    deps.Log,
+	})
+}
+
+// Start rebuilds the pending notifications from the database, which is the one
+// thing this server does at boot beyond listening.
+//
+// It is a rebuild rather than a recovery: nothing was lost, because nothing
+// here was ever state. Every session is still exactly what its row plus now()
+// says it is, and what the restart cost is a courtesy — the notification for a
+// bell that would otherwise have gone off unannounced.
+func (s *Server) Start(ctx context.Context) error {
+	if err := s.push.Restore(ctx); err != nil {
+		return err
+	}
+	if n := s.push.Pending(); n > 0 {
+		s.log.Info("push: rebuilt pending bells", "count", n)
+	}
+	return nil
+}
+
+// Close stops the pending timers. Losing them is what a restart does anyway;
+// this only keeps a shutdown from leaving them running behind it.
+func (s *Server) Close() { s.push.Close() }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
@@ -128,6 +191,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/session/start", s.startSession)
 	s.mux.HandleFunc("POST /api/session/{id}/cancel", s.cancelSession)
 	s.mux.HandleFunc("POST /api/session/{id}/confirm", s.confirmSession)
+
+	// The bell reaching a closed tab: the key a browser needs before it can
+	// subscribe, and the subscription it hands back. Both are ordinary HTTP,
+	// like every other write — what makes this feature unusual is only that
+	// something eventually happens without a request, and that lives entirely
+	// in the notifier.
+	s.mux.HandleFunc("GET /api/push/key", s.pushKey)
+	s.mux.HandleFunc("POST /api/push/subscribe", s.subscribePush)
 
 	// The one route that is not HTTP-shaped, and it carries nothing upstream:
 	// facts are pushed down it, and every change still arrives as one of the

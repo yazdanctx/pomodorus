@@ -135,6 +135,13 @@ type CreditedWorkBetweenRow struct {
 // Bounded by `ends_at`, like every other read of credited work: it is when the
 // bell went, and a pomodoro that began before Tehran midnight and rang after it
 // belongs to the day it was credited in.
+//
+// The task comes back with the row, name and visibility both, because the day
+// detail is built from the same pomodoros the line is. The join carries no
+// `deleted_at` filter on purpose: a tombstoned category keeps its name and
+// keeps appearing under it, since tidying a task list is not an edit to the
+// history recorded against it. Whether a stranger may read that name is the
+// application's question and not this query's — as in the feed.
 func (q *Queries) CreditedWorkBetween(ctx context.Context, arg CreditedWorkBetweenParams) ([]CreditedWorkBetweenRow, error) {
 	rows, err := q.db.Query(ctx, creditedWorkBetween, arg.UserID, arg.FromTime, arg.ToTime)
 	if err != nil {
