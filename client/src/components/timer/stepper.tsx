@@ -2,7 +2,7 @@ import { Minus, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { copy, t } from "@/lib/copy";
-import { faDigits } from "@/lib/format";
+import { faClock, faDigits } from "@/lib/format";
 
 /**
  * The band a pomodoro may be drawn from, and the step it moves in. The server
@@ -52,8 +52,10 @@ export function Stepper({
         <Minus />
       </Button>
 
-      <span className="font-mono text-5xl font-bold tracking-tight tabular-nums sm:text-7xl">
-        {faDigits(minutes)}
+      {/* Set as a full clock rather than a bare number, so the length you pick
+          and the countdown that replaces it in place are the same shape. */}
+      <span className="text-5xl font-bold tracking-tight tabular-nums sm:text-7xl">
+        {faClock(minutes * 60_000)}
       </span>
 
       <Button

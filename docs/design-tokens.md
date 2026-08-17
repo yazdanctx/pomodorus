@@ -110,7 +110,7 @@ resolves, so nothing below it ever moves. Hidden on `/login` and `/offline`.
 `Timer` + «تایمر». Running it swaps the label for the countdown and the icon
 for `Scan`. Ringing it inverts: `+mm:ss` counting up, `BellRing`, and
 `animate-pulse text-rose-500` on the link. The digits sit in a
-`flex min-w-10 justify-start font-mono tabular-nums` box, and while the live
+`flex min-w-10 justify-start tabular-nums` box, and while the live
 session is still unknown the badge holds the CTA box (`h-8 min-w-24`) as a
 skeleton — the same reserved-box rule as the auth CTA, so a mid-pomodoro reload
 does not flash «تایمر» and then swap to a countdown.
@@ -129,8 +129,8 @@ into one.
 | --- | --- |
 | Hero / wordmark | `text-3xl lg:text-6xl text-center tracking-widest font-light uppercase text-yellow-600` |
 | Login wordmark | `text-2xl font-light tracking-widest uppercase text-yellow-600` |
-| Running + ring clock | `font-mono text-6xl font-bold tabular-nums tracking-tight sm:text-7xl` |
-| Start-screen clock | `font-mono text-5xl font-bold tabular-nums tracking-tight sm:text-7xl` |
+| Running + ring clock | `text-6xl font-bold tabular-nums tracking-tight sm:text-7xl` |
+| Start-screen clock | `text-5xl font-bold tabular-nums tracking-tight sm:text-7xl` |
 | Ring headline | `text-3xl font-semibold tracking-tight sm:text-4xl` |
 | Day-detail total | `text-4xl leading-none font-bold sm:text-6xl` |
 | Section heading | `text-base font-medium` |
@@ -139,9 +139,17 @@ into one.
 | Landing note | `text-xs leading-7 text-muted-foreground sm:text-sm sm:leading-8` |
 | Offline / status line | `text-xs text-muted-foreground` |
 
-Every clock is `font-mono tabular-nums` and `dir="ltr"` — Persian digits in a
+Every clock is `tabular-nums` and `dir="ltr"` — Persian digits in a
 right-to-left document still count left to right, and without `tabular-nums`
 the digits jitter each tick.
+
+Clocks are deliberately **not** `font-mono`. Tailwind's mono stack is Latin —
+it has no Persian digit glyphs, so every numeral fell through it to whatever
+Arabic face the system happened to offer, and the clock rendered in a different
+typeface from the words beside it. The numerals belong in Peyda like everything
+else. `font-mono` survives in exactly one place, the login code field, where it
+is correct for the opposite reason: that code is *typed* and stays in ASCII, so
+it must not be drawn by a FaNum font at all.
 
 ## Numerals and dates
 
@@ -322,7 +330,7 @@ Work offers one `w-56` outline confirm; a break offers a stacked
 `w-full rounded-none border border-border bg-card`, rows in a `divide-y
 divide-border` list. Each row: `flex items-center justify-between gap-3 px-4
 py-3 text-sm`. Username `truncate font-medium hover:underline`, separator
-`" — "`, remaining time `shrink-0 font-mono tabular-nums text-muted-foreground`
+`" — "`, remaining time `shrink-0 tabular-nums text-muted-foreground`
 with `dir="ltr"`. Breaks show no time.
 
 **No heading above the box** — decided, not overlooked (#27). v1's SPEC asked
@@ -368,8 +376,8 @@ These are design decisions, not implementation details, and the rewrite must
 honor them:
 
 - Any control that depends on unresolved state **reserves its exact final
-  box** rather than rendering nothing. Applies to the NavBar CTA, the landing
-  CTA and today's focus.
+  box** rather than rendering nothing. Applies to the NavBar CTA and the
+  landing CTA.
 - **Reserving space is not guessing content.** The placeholder never predicts
   which label wins, so shift is removed without reintroducing a flash of the
   wrong CTA.

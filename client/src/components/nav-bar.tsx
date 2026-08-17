@@ -66,7 +66,7 @@ function TimerCta() {
   // min-w rather than w: it reserves the digits' box so a rolling minute does
   // not shuffle the CTA beside it, while a ring hours old (+۱۸۰:۰۰) is still
   // allowed to grow rather than spill out of it.
-  const clock = "flex min-w-10 justify-start font-mono tabular-nums";
+  const clock = "flex min-w-10 justify-start tabular-nums";
 
   if (session === undefined) {
     return <Skeleton className={CTA_BOX} data-testid="nav-timer-placeholder" />;

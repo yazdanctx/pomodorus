@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { ArrowRight, KeyRound, TriangleAlert } from "lucide-react";
+import { ArrowRight, KeyRound } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 
 import { Failure } from "@/components/failure";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { messageFor, post, type ServerTimed } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { copy, t } from "@/lib/copy";
+import { copy } from "@/lib/copy";
 import { enDigits } from "@/lib/format";
 
 /**
@@ -22,9 +22,9 @@ import { enDigits } from "@/lib/format";
  * either way.
  *
  * v1's login was a username and a password and has no reference screenshot;
- * this is built from the design tokens and v1's own furniture — the bordered
- * iconned alert taking the NavBar's band, the field hint, the
- * spinner-and-waiting-label submit, and the link back to the landing.
+ * this is built from the design tokens and v1's own furniture — the field
+ * hint, the spinner-and-waiting-label submit, and the link back to the
+ * landing.
  */
 export function LoginRoute() {
   const [email, setEmail] = useState("");
@@ -32,24 +32,6 @@ export function LoginRoute() {
 
   return (
     <main className="flex flex-1 flex-col">
-      {/* The NavBar is hidden on this route, so the notice takes its band:
-          full width of the content frame, on the NavBar's own px-6. */}
-      <div className="shrink-0 space-y-2 px-6 py-4">
-        <Alert>
-          <TriangleAlert />
-          <AlertTitle>{copy.landing.experimentalTitle}</AlertTitle>
-          <AlertDescription>
-            {copy.landing.experimental}
-            <p>{copy.landing.experimentalVibes}</p>
-          </AlertDescription>
-        </Alert>
-        <Alert>
-          <KeyRound />
-          <AlertTitle>{copy.login.otpTitle}</AlertTitle>
-          <AlertDescription>{copy.login.otpBody}</AlertDescription>
-        </Alert>
-      </div>
-
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="w-full max-w-xs space-y-8">
           {/* Set like the hero's title — same treatment, its own size. */}
@@ -119,6 +101,8 @@ function EmailStep({
           required
           autoComplete="email"
           dir="ltr"
+          // What is typed here is Latin all the way through, digits included.
+          className="font-latin"
         />
         <p className="text-xs text-muted-foreground">{copy.login.emailHint}</p>
       </div>
@@ -131,6 +115,26 @@ function EmailStep({
         pendingLabel={copy.login.sending}
       />
     </form>
+  );
+}
+
+/**
+ * «کد رفت …» with the address set apart from the sentence around it.
+ *
+ * It cannot go through `t`, which returns a string: the address is Latin and
+ * needs its own font and direction, and the UI font would otherwise draw the
+ * digits in it as Persian numerals — `yazdan2000@…` reading `yazdan۲۰۰۰@…`.
+ */
+function SentTo({ email }: { email: string }) {
+  const [before = "", after = ""] = copy.login.sentBody.split("{email}");
+  return (
+    <>
+      {before}
+      <span dir="ltr" className="font-latin">
+        {email}
+      </span>
+      {after}
+    </>
   );
 }
 
@@ -187,7 +191,9 @@ function CodeStep({
       <Alert>
         <KeyRound />
         <AlertTitle>{copy.login.sentTitle}</AlertTitle>
-        <AlertDescription>{t(copy.login.sentBody, { email })}</AlertDescription>
+        <AlertDescription>
+          <SentTo email={email} />
+        </AlertDescription>
       </Alert>
 
       <form onSubmit={submit} className="space-y-4">

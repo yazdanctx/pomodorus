@@ -63,7 +63,7 @@ function Row({ entry, now }: { entry: FeedEntry; now: number }) {
       {resting ? null : (
         <span
           dir="ltr"
-          className="shrink-0 font-mono tabular-nums text-muted-foreground"
+          className="shrink-0 tabular-nums text-muted-foreground"
         >
           {faClock(entry.endsAt - now)}
         </span>

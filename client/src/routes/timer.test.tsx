@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copy, t } from "@/lib/copy";
-import { faClock, faDigits, faDuration, faElapsed } from "@/lib/format";
+import { faClock, faDigits, faElapsed } from "@/lib/format";
 import { noteServerTime } from "@/lib/server-clock";
 import { TimerRoute } from "@/routes/timer";
-import { holding, renderAt, SIGNED_IN } from "@/test/render";
+import { renderAt, SIGNED_IN } from "@/test/render";
 
 /** The timer only exists for somebody signed in, so every test starts there. */
 const renderTimer = () => renderAt(<TimerRoute />, { auth: SIGNED_IN });
@@ -190,7 +190,7 @@ describe("the start screen", () => {
     server();
     renderTimer();
 
-    expect(await screen.findByText(faDigits(25))).toBeTruthy();
+    expect(await screen.findByText(faClock(25 * 60_000))).toBeTruthy();
     expect(
       screen.getByRole("button", { name: copy.timer.start }),
     ).toBeTruthy();
@@ -221,26 +221,26 @@ describe("the start screen", () => {
     renderTimer();
     const user = userEvent.setup();
 
-    await screen.findByText(faDigits(25));
+    await screen.findByText(faClock(25 * 60_000));
     await user.click(screen.getByRole("button", { name: /۳۰/ }));
-    expect(screen.getByText(faDigits(30))).toBeTruthy();
+    expect(screen.getByText(faClock(30 * 60_000))).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /۲۵/ }));
-    expect(screen.getByText(faDigits(25))).toBeTruthy();
+    expect(screen.getByText(faClock(25 * 60_000))).toBeTruthy();
   });
 
   it("disables the button for a limit it has reached", async () => {
     server();
     renderTimer();
     const user = userEvent.setup();
-    await screen.findByText(faDigits(25));
+    await screen.findByText(faClock(25 * 60_000));
 
     // Down to the floor: the minus is then disabled rather than silently
     // doing nothing, so the range is visible.
     for (let m = 25; m > 15; m -= 5) {
       await user.click(screen.getByRole("button", { name: new RegExp(faDigits(m - 5)) }));
     }
-    expect(screen.getByText(faDigits(15))).toBeTruthy();
+    expect(screen.getByText(faClock(15 * 60_000))).toBeTruthy();
     const minus = screen.getByRole("button", { name: new RegExp(faDigits(10)) });
     expect(minus.getAttribute("disabled")).not.toBeNull();
   });
@@ -272,7 +272,7 @@ describe("the start screen", () => {
     first.unmount();
 
     renderTimer();
-    expect(await screen.findByText(faDigits(30))).toBeTruthy();
+    expect(await screen.findByText(faClock(30 * 60_000))).toBeTruthy();
     // The task too: a refresh should not lose your place.
     expect(
       (await screen.findByRole("button", { name: copy.timer.start })).getAttribute(
@@ -925,84 +925,3 @@ describe("opening on a second device", () => {
   });
 });
 
-describe("today's focus", () => {
-  it("says how the day has gone", async () => {
-    server({ today: { count: 3, totalMs: 80 * 60_000 } });
-    renderTimer();
-
-    // «امروز ۳ تا — ۱ ساعت و ۲۰ دقیقه» — the count and the total, in Persian
-    // digits, as a sentence rather than a clock.
-    await screen.findByText(
-      t(copy.timer.todaySummary, {
-        count: faDigits(3),
-        duration: faDuration(80 * 60_000),
-      }),
-    );
-  });
-
-  it("says the day is empty only once the server has said so", async () => {
-    server({ today: { count: 0, totalMs: 0 } });
-    renderTimer();
-
-    await screen.findByText(copy.timer.todayEmpty);
-  });
-
-  it("says nothing at all while it is still asking", () => {
-    // A blank row, not «امروز تمرکز نکردی کلا» — flashing that at somebody who
-    // has done four pomodoros is worse than saying nothing.
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    renderTimer();
-
-    expect(screen.queryByText(copy.timer.todayEmpty)).toBeNull();
-  });
-
-  it("holds the row's height whether or not it knows", async () => {
-    // The reserved box, and the only state where the start screen is up while
-    // the day is still unknown: a context that has a session but no total.
-    // The row is there and empty rather than absent, so nothing above it moves
-    // when the answer lands.
-    const unknown = renderAt(<TimerRoute />, {
-      auth: SIGNED_IN,
-      session: holding(null, { today: undefined }),
-    });
-    const blank = unknown.container.querySelector("p.h-5");
-    expect(blank).toBeTruthy();
-    expect(blank?.textContent).toBe("");
-    unknown.unmount();
-
-    const known = renderAt(<TimerRoute />, {
-      auth: SIGNED_IN,
-      session: holding(null, { today: { count: 2, totalMs: 50 * 60_000 } }),
-    });
-    const filled = known.container.querySelector("p.h-5");
-    // The same box, now with something in it.
-    expect(filled).toBeTruthy();
-    expect(filled?.textContent).toContain(faDigits(2));
-  });
-
-  it("ticks up when a pomodoro completes, without a reload", async () => {
-    // The total rides on the timer payload, so acknowledging a bell answers
-    // with the new day as part of the same response.
-    server({
-      session: workSession({ endsAt: NOW - 1000 }),
-      today: EMPTY_DAY,
-      onConfirm: () => timerJson(null, { count: 1 }, CLASSIC, {
-        count: 1,
-        totalMs: 25 * 60_000,
-      }),
-    });
-    renderTimer();
-
-    const confirm = await screen.findByRole("button", {
-      name: new RegExp(copy.timer.confirmWork),
-    });
-    await userEvent.click(confirm);
-
-    await screen.findByText(
-      t(copy.timer.todaySummary, {
-        count: faDigits(1),
-        duration: faDuration(25 * 60_000),
-      }),
-    );
-  });
-});

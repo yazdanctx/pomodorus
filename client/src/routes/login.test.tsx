@@ -50,11 +50,11 @@ describe("the login screen", () => {
     expect(screen.queryByLabelText(/پسورد/)).toBeNull();
   });
 
-  it("stands the experimental notice and the no-password notice above the form", () => {
+  it("stands nothing above the form — no notices, just the sign-in", () => {
     renderAt(<LoginRoute />, { path: "/login" });
 
-    expect(screen.getByText(copy.landing.experimentalTitle)).toBeTruthy();
-    expect(screen.getByText(copy.login.otpTitle)).toBeTruthy();
+    expect(screen.queryByText(copy.landing.experimentalTitle)).toBeNull();
+    expect(screen.queryByText(copy.login.otpTitle)).toBeNull();
   });
 
   it("leads somewhere back, so a signed-out visitor is not stranded", () => {

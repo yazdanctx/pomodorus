@@ -57,7 +57,7 @@ function IntervalRow({
         </Button>
         {/* Fixed width and tabular figures, so «۵ دقیقه» and «۲۰ دقیقه» do not
             shift the buttons and all three rows line up as one column. */}
-        <span className="w-24 text-center font-mono tabular-nums">{value}</span>
+        <span className="w-24 text-center tabular-nums">{value}</span>
         <Button
           variant="outline"
           size="icon"

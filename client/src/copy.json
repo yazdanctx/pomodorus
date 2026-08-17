@@ -82,9 +82,7 @@
     "settingsPerCycle": "پومودورو تا چیل حسابی",
     "settingsNote": "پیش‌فرضا همون تکنیک اصلی پومودوروئه: ۲۵ / ۵ / ۲۰ و هر ۴ تا یه چیل حسابی",
     "settingsDone": "باشه",
-    "count": "{n} تا",
-    "todaySummary": "امروز {count} تا — {duration}",
-    "todayEmpty": "امروز تمرکز نکردی کلا"
+    "count": "{n} تا"
   },
   "feed": {
     "empty": "الان کسی آنلاین نیست 😴",
