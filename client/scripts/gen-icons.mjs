@@ -1,4 +1,7 @@
-// Regenerates every icon asset from scripts/icon*.svg. Run: node scripts/gen-icons.mjs
+// Regenerates every icon asset from scripts/icon*.svg, into public/ — which is
+// where Vite serves them from and, after a build, where they sit inside the Go
+// binary. Needs sharp, which is not a dependency of the app:
+// `npm i --no-save sharp && node scripts/gen-icons.mjs`.
 import { readFile, writeFile, copyFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -37,9 +40,11 @@ function ico(images) {
 
 const favSizes = [16, 32, 48];
 const favs = await Promise.all(favSizes.map(async (s) => ({ size: s, data: await png(squircle, s) })));
-await writeFile(path.join(root, "app/favicon.ico"), ico(favs));
-await copyFile(path.join(root, "scripts/icon.svg"), path.join(root, "app/icon.svg"));
-await writeFile(path.join(root, "app/apple-icon.png"), await png(maskable, 180));
+await writeFile(path.join(root, "public/favicon.ico"), ico(favs));
+await copyFile(path.join(root, "scripts/icon.svg"), path.join(root, "public/icon.svg"));
+// The apple-touch icon is the maskable art: iOS masks it to its own shape and
+// adds no padding, so the squircle variant would be cropped twice.
+await writeFile(path.join(root, "public/apple-touch-icon.png"), await png(maskable, 180));
 await writeFile(path.join(root, "public/icon-192.png"), await png(squircle, 192));
 await writeFile(path.join(root, "public/icon-512.png"), await png(squircle, 512));
 await writeFile(path.join(root, "public/icon-maskable-512.png"), await png(maskable, 512));

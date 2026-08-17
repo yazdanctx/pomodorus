@@ -1,14 +1,45 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
+
+import { manifestJSON } from "./src/manifest";
 
 // The Go server's default port. Both are off the obvious numbers because this
 // machine already has a native Postgres on 5432 and something on 8080.
 const API = "http://localhost:8081";
 
+const MANIFEST = "/manifest.webmanifest";
+
+/**
+ * Serves the manifest in dev and writes it into the build.
+ *
+ * It is generated rather than kept in `public/` because it is made of copy —
+ * the app's name and description — and copy lives in copy.json. A static file
+ * would be a second place for those two strings to drift.
+ */
+function webManifest(): Plugin {
+  return {
+    name: "pomodorus:web-manifest",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.split("?")[0] !== MANIFEST) return next();
+        res.setHeader("Content-Type", "application/manifest+json");
+        res.end(manifestJSON);
+      });
+    },
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: MANIFEST.slice(1),
+        source: manifestJSON,
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), webManifest()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

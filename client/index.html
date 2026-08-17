@@ -7,6 +7,15 @@
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Installable: the manifest is generated from copy.json by a Vite plugin
+         (see src/manifest.ts), so the app's name lives in one place. The
+         apple-* pair is what iOS reads instead — an app added to the home
+         screen there opens standalone with a black status bar. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Pomodorus" />
     <!-- Public routes get their OG tags injected by the Go server at request
          time (see server/internal/web), which is how a shared profile link
          previews without server-side rendering. -->

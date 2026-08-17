@@ -137,4 +137,25 @@ describe("NavBar", () => {
       );
     });
   });
+
+  // The installed app's icon is a tile — a squircle with a gradient — because
+  // it has to sit on a dock beside other tiles. In here it would be the only
+  // rounded thing on screen, so the bar draws the line-art alone.
+  describe("the mark", () => {
+    it("is flat and untiled", () => {
+      renderAt(<NavBar />, { auth: SIGNED_IN });
+
+      const mark = screen
+        .getByRole("banner")
+        .querySelector(`a[aria-label="${copy.app.name}"] svg`);
+      expect(mark).not.toBeNull();
+
+      // No tile: the squircle is a filled rect behind the artwork, and there
+      // is no fill in the bar at all — the glyph is a stroke in currentColor,
+      // so it tracks the foreground rather than carrying its own palette.
+      expect(mark?.querySelector("rect")).toBeNull();
+      expect(mark?.getAttribute("fill")).toBe("none");
+      expect(mark?.getAttribute("stroke")).toBe("currentColor");
+    });
+  });
 });

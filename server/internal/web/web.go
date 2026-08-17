@@ -14,6 +14,7 @@ import (
 	"embed"
 	"errors"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"strings"
@@ -23,6 +24,13 @@ import (
 
 //go:embed all:dist
 var embedded embed.FS
+
+func init() {
+	// Go's table has no entry for the manifest, and without one the file
+	// server sniffs it as text/plain — which browsers accept and every
+	// installability audit complains about.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 // Options are the facts about the deployment the client is served into, none
 // of which this package can work out for itself.

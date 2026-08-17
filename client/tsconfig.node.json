@@ -8,7 +8,12 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "composite": true
+    "composite": true,
+    "resolveJsonModule": true
   },
-  "include": ["vite.config.ts"]
+  // src/manifest.ts belongs to the app project too. It is listed here because
+  // the manifest is generated from copy.json at build time, which means
+  // vite.config.ts imports it — and a composite project must list every file
+  // it reaches.
+  "include": ["vite.config.ts", "src/manifest.ts", "src/copy.json"]
 }
