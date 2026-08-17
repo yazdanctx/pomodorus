@@ -43,6 +43,11 @@ Not captured, and worth knowing before you try to match them:
 - **Feed empty / offline states.** The feed returns `null` when nothing is
   live, so there is no empty card to photograph — but SPEC claims the section
   always renders and holds a row's height. The code wins: it renders nothing.
+  *Settled in the rewrite (#27):* the box now holds a row's height when empty,
+  because the layout-shift rule in `docs/design-tokens.md` says sections that
+  can be empty do — not because SPEC said so. The heading SPEC also asked for
+  was declined, since the same file specifies the box without one and these
+  screenshots show none.
 - **Long break and the cycle reset**, which need four completed pomodoros.
 - **Profanity refusals** in the picker and on signup.
 - **A ring discovered stale on launch** (silent, no audio).

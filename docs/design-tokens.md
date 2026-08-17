@@ -325,6 +325,15 @@ py-3 text-sm`. Username `truncate font-medium hover:underline`, separator
 `" — "`, remaining time `shrink-0 font-mono tabular-nums text-muted-foreground`
 with `dir="ltr"`. Breaks show no time.
 
+**No heading above the box** — decided, not overlooked (#27). v1's SPEC asked
+for one and v1 never built it, and the screenshots are what this rewrite
+matches. The empty state *is* built, which looks like following SPEC on one
+half of a sentence and the screenshots on the other; it is not. Each half
+follows this file: the box carries no heading because the spec above describes
+it without one, and it holds a row's height because of the rule under
+Layout-shift rules below. There is no copy for a heading — do not
+reintroduce one.
+
 ## Profile / day detail
 
 - Chart area: `h-44 w-full`, `mt-4`.
