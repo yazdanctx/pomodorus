@@ -1,0 +1,16 @@
+{
+  "app": "pomodorus",
+  "platform": "docker",
+  "port": 8081,
+  "timezone": "UTC",
+  "build": {
+    "location": "germany"
+  },
+  "healthCheck": {
+    "command": "CMD curl --fail http://127.0.0.1:8081/api/health || exit 1",
+    "interval": 30,
+    "timeout": 15,
+    "retries": 3,
+    "startPeriod": 10
+  }
+}

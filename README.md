@@ -49,6 +49,19 @@ make build   # client → server/internal/web/dist → embedded in bin/pomodorus
 
 One binary serves the API, the WebSocket and the client.
 
+## Deploying
+
+The whole app is one Docker image: the client built into the binary, on Liara,
+with managed Postgres and a managed email server beside it.
+
+```bash
+liara deploy   # or: make deploy
+```
+
+Step by step, including the parts that are not obvious — port 587 and not 465,
+the `citext` extension, the permanent VAPID keypair, and why this runs on one
+instance — see `docs/deploy-liara.md`.
+
 ## Testing
 
 ```bash

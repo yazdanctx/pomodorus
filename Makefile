@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down logs dev server client build run test test-server test-client vapid profanity fmt tidy psql mail clean
+.PHONY: help up down logs dev server client build run test test-server test-client vapid profanity fmt tidy psql mail deploy clean
 
 ## help: list targets
 help:
@@ -87,6 +87,13 @@ psql:
 ## mail: open the Mailpit inbox
 mail:
 	open http://localhost:8025
+
+## deploy: ship to Liara (see docs/deploy-liara.md)
+# The image builds the client itself, so this needs no local build — but it
+# does need the app's environment to already be set, since a production boot
+# without a VAPID keypair is a refused boot.
+deploy:
+	liara deploy
 
 ## clean: remove build output and the database volume
 clean:

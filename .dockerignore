@@ -1,0 +1,27 @@
+# Also the upload list: the Liara CLI reads this file when it packs the
+# project, so anything here is something the build server never sees.
+
+.git
+.github
+node_modules
+**/node_modules
+
+# Built by the image itself, both of them.
+bin
+server/internal/web/dist
+
+.env
+.env.*
+!.env.example
+
+*.tsbuildinfo
+test-results
+playwright-report
+
+docs
+.agents
+.claude
+*.md
+
+.DS_Store
+**/.DS_Store
