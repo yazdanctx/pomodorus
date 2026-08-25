@@ -135,7 +135,7 @@ describe("the category picker", () => {
       screen.getByLabelText(copy.categories.namePlaceholder),
       "یه چیزی",
     );
-    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: copy.categories.add }));
 
     expect(create).toHaveBeenCalledWith("یه چیزی", false);
@@ -161,11 +161,13 @@ describe("the category picker", () => {
   });
 
   it("renames from the edit view", async () => {
-    const update = vi.fn(async (id: string, name: string, isPublic: boolean) => ({
-      id,
-      name,
-      isPublic,
-    }));
+    const update = vi.fn(
+      async (id: string, name: string, isPublic: boolean) => ({
+        id,
+        name,
+        isPublic,
+      }),
+    );
     const { user } = renderPicker([درس], { update });
 
     await openPicker(user);
@@ -177,7 +179,9 @@ describe("the category picker", () => {
     const field = screen.getByLabelText(copy.categories.namePlaceholder);
     await user.clear(field);
     await user.type(field, "ریاضی");
-    await user.click(screen.getByRole("button", { name: copy.categories.save }));
+    await user.click(
+      screen.getByRole("button", { name: copy.categories.save }),
+    );
 
     expect(update).toHaveBeenCalledWith("c1", "ریاضی", true);
   });
@@ -236,6 +240,28 @@ describe("the category picker", () => {
     expect(within(list).getByText("درس")).toBeTruthy();
     expect(within(list).getByText("یه چیزی")).toBeTruthy();
     expect(within(list).getByText(copy.categories.privateBadge)).toBeTruthy();
-    expect(within(list).getByText(copy.categories.new)).toBeTruthy();
+  });
+
+  it("keeps every category reachable when there are more than fit", async () => {
+    const many: Category[] = Array.from({ length: 12 }, (_, i) => ({
+      id: `c${i}`,
+      name: `تسک ${i}`,
+      isPublic: true,
+    }));
+    const { user, onSelect } = renderPicker(many);
+
+    await openPicker(user);
+    await user.click(await screen.findByText("تسک 11"));
+
+    expect(onSelect).toHaveBeenCalledWith("c11");
+  });
+
+  it("creates from the header, alongside the title", async () => {
+    const { user } = renderPicker([درس]);
+
+    await openPicker(user);
+    await user.click(screen.getByRole("button", { name: copy.categories.new }));
+
+    expect(screen.getByLabelText(copy.categories.namePlaceholder)).toBeTruthy();
   });
 });

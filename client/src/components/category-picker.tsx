@@ -1,8 +1,16 @@
 import { useState } from "react";
-import { ArrowRight, Check, ChevronsUpDown, Pencil, Plus } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  ChevronsUpDown,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 
 import { Failure } from "@/components/failure";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -20,7 +28,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { messageFor } from "@/lib/api";
 import type { Category } from "@/lib/categories";
 import { copy, t } from "@/lib/copy";
@@ -68,7 +75,8 @@ export function CategoryPicker({
   // rather than set when the dialog opens, which also covers deleting the last
   // category from the edit view.
   const isEmpty = categories.length === 0;
-  const showCreate = view.name === "create" || (isEmpty && view.name === "picker");
+  const showCreate =
+    view.name === "create" || (isEmpty && view.name === "picker");
 
   const backToPicker = () => {
     setView({ name: "picker" });
@@ -131,8 +139,16 @@ export function CategoryPicker({
         <DialogContent>
           {!showCreate && view.name === "picker" && (
             <>
-              <DialogHeader>
+              <DialogHeader className="flex-row items-center justify-between gap-2">
                 <DialogTitle>{copy.categories.pick}</DialogTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setView({ name: "create" })}
+                >
+                  <Plus />
+                  {copy.categories.new}
+                </Button>
               </DialogHeader>
               <Command className="bg-transparent">
                 <div className="mb-2">
@@ -148,7 +164,10 @@ export function CategoryPicker({
                   />
                 </div>
 
-                <CommandList>
+                {/* The bordered box is the scroller: five rows of 40px plus
+                    its own padding, so a longer list scrolls inside a border
+                    that stays put. */}
+                <CommandList className="max-h-54 border p-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border">
                   <CommandEmpty>
                     <Button
                       size="sm"
@@ -157,11 +176,13 @@ export function CategoryPicker({
                     >
                       <Plus />
                       <span className="truncate">
-                        {t(copy.categories.createNamed, { name: search.trim() })}
+                        {t(copy.categories.createNamed, {
+                          name: search.trim(),
+                        })}
                       </span>
                     </Button>
                   </CommandEmpty>
-                  <CommandGroup className="border p-2">
+                  <CommandGroup className="p-0">
                     {categories.map((category) => (
                       <CommandItem
                         key={category.id}
@@ -173,7 +194,9 @@ export function CategoryPicker({
                       >
                         <Check
                           className={
-                            selected === category.id ? "opacity-100" : "opacity-0"
+                            selected === category.id
+                              ? "opacity-100"
+                              : "opacity-0"
                           }
                         />
                         <span className="flex-1 truncate">{category.name}</span>
@@ -198,15 +221,6 @@ export function CategoryPicker({
                         </Button>
                       </CommandItem>
                     ))}
-                  </CommandGroup>
-                  <CommandGroup forceMount className="mt-2">
-                    <CommandItem
-                      forceMount
-                      onSelect={() => setView({ name: "create" })}
-                    >
-                      <Plus />
-                      {copy.categories.new}
-                    </CommandItem>
                   </CommandGroup>
                 </CommandList>
               </Command>
@@ -313,11 +327,15 @@ function CreateView({
             if (event.key === "Enter") void submit();
           }}
         />
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="new-public"
+            checked={isPublic}
+            onCheckedChange={(next) => setIsPublic(next === true)}
+          />
           <Label htmlFor="new-public" className="text-sm text-muted-foreground">
             {copy.categories.publicLabel}
           </Label>
-          <Switch id="new-public" checked={isPublic} onCheckedChange={setIsPublic} />
         </div>
         <Failure message={refused} />
         <div className="flex gap-2">
@@ -394,21 +412,21 @@ function EditView({
             setRefused(null);
           }}
         />
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id={`public-${category.id}`}
+            checked={isPublic}
+            onCheckedChange={(next) => setIsPublic(next === true)}
+          />
           <Label
             htmlFor={`public-${category.id}`}
             className="text-sm text-muted-foreground"
           >
             {copy.categories.publicLabel}
           </Label>
-          <Switch
-            id={`public-${category.id}`}
-            checked={isPublic}
-            onCheckedChange={setIsPublic}
-          />
         </div>
         <Failure message={refused} />
-        <div className="flex justify-between gap-2">
+        <div className="flex gap-2">
           <Button
             size="sm"
             disabled={!name.trim() || pending}
@@ -416,13 +434,17 @@ function EditView({
           >
             {copy.categories.save}
           </Button>
+          {/* The one place the app spends a hue outside the ringing timer:
+              deleting a category takes its sessions with it, and there is no
+              undo. */}
           <Button
             size="sm"
-            variant="outline"
-            className="text-muted-foreground"
+            variant="ghost"
+            className="text-rose-500 hover:text-rose-500"
             disabled={pending}
             onClick={() => void remove()}
           >
+            <Trash2 />
             {copy.categories.delete}
           </Button>
         </div>

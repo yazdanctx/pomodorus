@@ -3,6 +3,11 @@
    counterparts, which the dialog and the tooltip are written against. */
 @import "tw-animate-css";
 
+/* Supplies `scrollbar-thin` and the `scrollbar-thumb-*` / `scrollbar-track-*`
+   colour utilities, so a scrolling box wears the app's greys instead of
+   whatever the OS draws. */
+@plugin "tailwind-scrollbar";
+
 /* The design is carried over unchanged from v1; the values below are the ones
    recorded in docs/design-tokens.md, not re-picked. Anything that looks
    arbitrary is load-bearing and has a note. */

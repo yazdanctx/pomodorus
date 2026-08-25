@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -132,6 +133,30 @@ describe("Switch", () => {
     expect(classes).toContain("after:-inset-x-3");
     expect(classes).toContain("after:-inset-y-2");
     expect(classes).toContain("data-[size=default]:h-[18.4px]");
+  });
+
+  // The filled track is the whole of the switch: styled off an attribute Radix
+  // does not set, it renders as nothing at all.
+  it("keys its fill to the attribute Radix actually writes", () => {
+    render(<Switch aria-label="پابلیک" defaultChecked />);
+    const el = screen.getByRole("switch");
+
+    expect(el.getAttribute("data-state")).toBe("checked");
+    expect(classesOf(el)).toContain("data-[state=checked]:bg-primary");
+  });
+});
+
+describe("Checkbox", () => {
+  it("keeps the box small and the target large, and fills on the state Radix writes", () => {
+    render(<Checkbox aria-label="پابلیک" defaultChecked />);
+    const el = screen.getByRole("checkbox");
+    const classes = classesOf(el);
+
+    expect(classes).toContain("size-4");
+    expect(classes).toContain("after:-inset-2");
+    expect(classes).toContain("rounded-none");
+    expect(el.getAttribute("data-state")).toBe("checked");
+    expect(classes).toContain("data-[state=checked]:bg-primary");
   });
 });
 
