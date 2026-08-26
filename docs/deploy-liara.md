@@ -130,6 +130,10 @@ point the image at Liara's mirrors — `https://package-mirror.liara.ir/reposito
 for npm and `https://package-mirror.liara.ir/repository/go/` with `GOSUMDB=off`
 for Go.
 
+Liara builds the image on its own servers, so `docker build .` locally is a
+check that the Dockerfile still works and nothing more — the architecture that
+ships is theirs, not your laptop's.
+
 The schema migrates itself at boot, from the binary's embedded migrations.
 There is no migrate step, and no window in which a new binary talks to an old
 schema.
