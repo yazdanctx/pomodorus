@@ -106,9 +106,17 @@ against the string — that gap is DNS rebinding. Subscriptions are also capped
 per account, by trimming the least recently seen: without a ceiling one account
 turns each bell into unbounded outbound requests at a target of its choosing.
 
-**Offline is out of scope.** v1 was local-first; this is not. Do not add local
-queues, replay, or conflict resolution. There *is* a service worker, and it
-exists solely to receive a push — it caches nothing, and must not start.
+**Offline is a mirror plus a replay, not a second mode.** Every write goes to
+the device's local mirror first and is replayed to the server through the same
+idempotent POSTs, online or not. The server still owns the live slot: one live
+session per user, first to reach the server wins, and a finished session
+replayed late is always accepted. The service worker caches the app shell and
+receives push; it does nothing else. See ADR 0007, which supersedes the
+offline half of ADR 0001.
+
+**A blackhole is a session, not a mode.** Open-ended, credited for elapsed
+time up to a 16 hour cap, holding several tasks, and the one live session its
+inner pomodoros hang off. See ADR 0006 and `CONTEXT.md`.
 
 ## Style
 
