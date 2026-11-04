@@ -24,6 +24,23 @@ Element.prototype.scrollIntoView ??= () => {};
 // answer rather than a stand-in.
 document.elementFromPoint ??= () => null;
 
+// Node 22+ declares a `localStorage` global of its own that is `undefined`
+// until the process is started with `--localstorage-file`. The key existing
+// is enough for Vitest's jsdom environment to leave it alone, so the browser
+// storage every test relies on never reaches the global. Put a jsdom one
+// there instead, on the same origin the document has.
+if (globalThis.localStorage === undefined) {
+  const { JSDOM } = await import("jsdom");
+  const { window: w } = new JSDOM("", { url: location.href });
+  for (const key of ["localStorage", "sessionStorage"] as const) {
+    Object.defineProperty(globalThis, key, {
+      value: w[key],
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
 // Vitest is run without globals, so React Testing Library's own auto-cleanup
 // never registers itself. Unmounting between tests is what stops one test's
 // document from being queryable in the next.
